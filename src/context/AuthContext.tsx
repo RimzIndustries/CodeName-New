@@ -81,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(authUser);
         const userDocRef = doc(db, 'users', authUser.uid);
         
-        unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
+        unsubscribeFromSnapshot = onSnapshot(userDocRef, async (userDoc) => {
           if (userDoc.exists()) {
             const profile = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
 
@@ -90,6 +90,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               return; 
             }
             
+            // --- Hourly Bonus Logic ---
+            if (profile.role === 'user' && profile.lastResourceUpdate) {
+                const now = Timestamp.now();
+                const lastUpdate = (profile.lastResourceUpdate as Timestamp).toDate();
+                const diffInMs = now.toMillis() - lastUpdate.getTime();
+                const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+
+                if (diffInHours > 0) {
+                    try {
+                        const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
+                        const bonusesDocSnap = await getDoc(bonusesDocRef);
+                        
+                        if (bonusesDocSnap.exists()) {
+                            const bonusData = bonusesDocSnap.data();
+                            const moneyBonus = (bonusData.money || 100) * diffInHours;
+                            const foodBonus = (bonusData.food || 10) * diffInHours;
+
+                            await updateDoc(userDocRef, {
+                                money: increment(moneyBonus),
+                                food: increment(foodBonus),
+                                lastResourceUpdate: serverTimestamp()
+                            });
+                        }
+                    } catch (error) {
+                        console.error("Failed to apply hourly bonus:", error);
+                    }
+                }
+            }
+            // --- End of Hourly Bonus Logic ---
+
             setUserProfile(profile);
 
             const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
