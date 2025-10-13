@@ -143,12 +143,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!userProfile?.uid) return;
         
         const userDocRef = doc(db, 'users', userProfile.uid);
-        let batch = writeBatch(db);
+        const now = Timestamp.now();
+        
+        // Use a single batch for all updates in this tick
+        const batch = writeBatch(db);
         let hasUpdate = false;
 
         // --- Hourly Bonus Logic ---
         if (userProfile.lastResourceUpdate) {
-            const now = Timestamp.now();
             const lastUpdate = (userProfile.lastResourceUpdate as Timestamp).toDate();
             const diffInMs = now.toMillis() - lastUpdate.getTime();
             const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
@@ -176,11 +178,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         const totalMoneyBonus = (hourlyMoneyBonus + moneyFromTambang) * diffInHours;
                         const totalFoodBonus = (hourlyFoodBonus + foodFromFarm) * diffInHours;
                         
-                        batch.update(userDocRef, {
-                            money: increment(totalMoneyBonus),
-                            food: increment(totalFoodBonus),
-                            lastResourceUpdate: serverTimestamp()
-                        });
+                        if(totalMoneyBonus > 0) batch.update(userDocRef, { money: increment(totalMoneyBonus) });
+                        if(totalFoodBonus > 0) batch.update(userDocRef, { food: increment(totalFoodBonus) });
+                        
+                        batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
                         hasUpdate = true;
                     }
                 } catch (error) {
@@ -191,14 +192,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         // --- Construction & Training Queue Logic ---
         try {
-            const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', userProfile.uid), where('completionTime', '<=', Timestamp.now()));
-            const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', userProfile.uid), where('completionTime', '<=', Timestamp.now()));
+            // Fetch all jobs for the user, then filter by time on the client.
+            // This avoids needing a composite index in Firestore.
+            const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', userProfile.uid));
+            const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', userProfile.uid));
             
             const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
 
-            if (!constructionSnapshot.empty) {
+            const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime <= now);
+            if (completedConstructionJobs.length > 0) {
                 const buildingUpdates: { [key: string]: any } = {};
-                constructionSnapshot.forEach(doc => {
+                completedConstructionJobs.forEach(doc => {
                     const job = doc.data();
                     buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                     batch.delete(doc.ref);
@@ -207,9 +211,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 hasUpdate = true;
             }
 
-            if (!trainingSnapshot.empty) {
+            const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime <= now);
+            if (completedTrainingJobs.length > 0) {
                 const unitUpdates: { [key: string]: any } = {};
-                trainingSnapshot.forEach(doc => {
+                completedTrainingJobs.forEach(doc => {
                     const job = doc.data();
                     unitUpdates[`units.${job.unitId}`] = increment(job.amount);
                     batch.delete(doc.ref);
@@ -236,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
 
   }, [userProfile]);
+
 
   const value = { user, userProfile, loading };
 
