@@ -174,12 +174,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         
                         const moneyFromTambang = (userProfile.buildings?.tambang ?? 0) * (effectsData.tambang?.money ?? 0);
                         const foodFromFarm = (userProfile.buildings?.farm ?? 0) * (effectsData.farm?.food ?? 0);
+                        
+                        let unemployedFromBuildings = 0;
+                        if (userProfile.buildings && effectsData) {
+                            for (const buildingKey in userProfile.buildings) {
+                                const buildingCount = userProfile.buildings[buildingKey as keyof BuildingCounts] || 0;
+                                const buildingEffect = effectsData[buildingKey as keyof BuildingCounts];
+                                if (buildingEffect && buildingEffect.unemployed) {
+                                    unemployedFromBuildings += buildingCount * buildingEffect.unemployed;
+                                }
+                            }
+                        }
 
                         const totalMoneyBonus = (hourlyMoneyBonus + moneyFromTambang) * diffInHours;
                         const totalFoodBonus = (hourlyFoodBonus + foodFromFarm) * diffInHours;
+                        const totalUnemployedBonus = unemployedFromBuildings * diffInHours;
                         
                         if(totalMoneyBonus > 0) batch.update(userDocRef, { money: increment(totalMoneyBonus) });
                         if(totalFoodBonus > 0) batch.update(userDocRef, { food: increment(totalFoodBonus) });
+                        if(totalUnemployedBonus > 0) batch.update(userDocRef, { unemployed: increment(totalUnemployedBonus) });
                         
                         batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
                         hasUpdate = true;
@@ -192,8 +205,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         // --- Construction & Training Queue Logic ---
         try {
-            // Fetch all jobs for the user, then filter by time on the client.
-            // This avoids needing a composite index in Firestore.
             const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', userProfile.uid));
             const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', userProfile.uid));
             
