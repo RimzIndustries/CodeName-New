@@ -30,6 +30,7 @@ interface UnitCounts {
 
 interface TrainingJob {
     id: string;
+    userId: string;
     unitId: keyof UnitCounts;
     amount: number;
     completionTime: Timestamp;
@@ -224,10 +225,21 @@ export default function BarracksPage() {
         const durationPerJobInHours = trainingTime * timeMultiplier;
         const durationPerJobInMs = durationPerJobInHours * 60 * 60 * 1000;
 
+        // Find the last completion time in the current queue to chain new jobs
+        let lastCompletionTime = new Date();
+        if (trainingQueue.length > 0) {
+            lastCompletionTime = trainingQueue[trainingQueue.length - 1].completionTime.toDate();
+        }
+
+
         for (const unitId in trainOrder) {
             const amount = trainOrder[unitId];
             if (amount > 0) {
-                const jobCompletionTime = new Date(Date.now() + durationPerJobInMs);
+                // Each job starts after the previous one finishes
+                const jobStartTime = lastCompletionTime > new Date() ? lastCompletionTime : new Date();
+                const jobCompletionTime = new Date(jobStartTime.getTime() + durationPerJobInMs);
+                lastCompletionTime = jobCompletionTime; // Update for the next job in the loop
+
                 const jobRef = doc(collection(db, 'trainingQueue'));
                 batch.set(jobRef, {
                     userId: user.uid,
