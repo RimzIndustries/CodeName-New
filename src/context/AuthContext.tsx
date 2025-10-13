@@ -90,36 +90,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               return; 
             }
             
-            // --- Hourly Bonus Logic ---
-            if (profile.role === 'user' && profile.lastResourceUpdate) {
-                const now = Timestamp.now();
-                const lastUpdate = (profile.lastResourceUpdate as Timestamp).toDate();
-                const diffInMs = now.toMillis() - lastUpdate.getTime();
-                const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
-
-                if (diffInHours > 0) {
-                    try {
-                        const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
-                        const bonusesDocSnap = await getDoc(bonusesDocRef);
-                        
-                        if (bonusesDocSnap.exists()) {
-                            const bonusData = bonusesDocSnap.data();
-                            const moneyBonus = (bonusData.money || 100) * diffInHours;
-                            const foodBonus = (bonusData.food || 10) * diffInHours;
-
-                            await updateDoc(userDocRef, {
-                                money: increment(moneyBonus),
-                                food: increment(foodBonus),
-                                lastResourceUpdate: serverTimestamp()
-                            });
-                        }
-                    } catch (error) {
-                        console.error("Failed to apply hourly bonus:", error);
-                    }
-                }
-            }
-            // --- End of Hourly Bonus Logic ---
-
             setUserProfile(profile);
 
             const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
@@ -165,10 +135,106 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [router, pathname]);
   
+  // New useEffect for handling background tasks like resource updates and queue processing
+  useEffect(() => {
+    if (!userProfile || userProfile.role !== 'user') return;
+
+    const processBackgroundTasks = async () => {
+        const userDocRef = doc(db, 'users', userProfile.uid);
+        let batch = writeBatch(db);
+        let hasUpdate = false;
+
+        // --- Hourly Bonus Logic ---
+        if (userProfile.lastResourceUpdate) {
+            const now = Timestamp.now();
+            const lastUpdate = (userProfile.lastResourceUpdate as Timestamp).toDate();
+            const diffInMs = now.toMillis() - lastUpdate.getTime();
+            const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+
+            if (diffInHours > 0) {
+                try {
+                    const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
+                    const bonusesDocSnap = await getDoc(bonusesDocRef);
+                    const buildingEffectsRef = doc(db, 'game-settings', 'building-effects');
+                    const buildingEffectsSnap = await getDoc(buildingEffectsRef);
+
+                    if (bonusesDocSnap.exists() && buildingEffectsSnap.exists()) {
+                        const bonusData = bonusesDocSnap.data();
+                        const effectsData = buildingEffectsSnap.data();
+
+                        const hourlyMoneyBonus = bonusData.money || 100;
+                        const hourlyFoodBonus = bonusData.food || 10;
+                        
+                        const moneyFromTambang = (userProfile.buildings?.tambang || 0) * (effectsData.tambang?.money || 0);
+                        const foodFromFarm = (userProfile.buildings?.farm || 0) * (effectsData.farm?.food || 0);
+
+                        const totalMoneyBonus = (hourlyMoneyBonus + moneyFromTambang) * diffInHours;
+                        const totalFoodBonus = (hourlyFoodBonus + foodFromFarm) * diffInHours;
+                        
+                        batch.update(userDocRef, {
+                            money: increment(totalMoneyBonus),
+                            food: increment(totalFoodBonus),
+                            lastResourceUpdate: serverTimestamp()
+                        });
+                        hasUpdate = true;
+                    }
+                } catch (error) {
+                    console.error("Failed to calculate hourly bonus:", error);
+                }
+            }
+        }
+        
+        // --- Construction & Training Queue Logic ---
+        try {
+            const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', userProfile.uid), where('completionTime', '<=', Timestamp.now()));
+            const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', userProfile.uid), where('completionTime', '<=', Timestamp.now()));
+            
+            const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
+
+            if (!constructionSnapshot.empty) {
+                const buildingUpdates: { [key: string]: any } = {};
+                constructionSnapshot.forEach(doc => {
+                    const job = doc.data();
+                    buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
+                    batch.delete(doc.ref);
+                });
+                batch.update(userDocRef, buildingUpdates);
+                hasUpdate = true;
+            }
+
+            if (!trainingSnapshot.empty) {
+                const unitUpdates: { [key: string]: any } = {};
+                trainingSnapshot.forEach(doc => {
+                    const job = doc.data();
+                    unitUpdates[`units.${job.unitId}`] = increment(job.amount);
+                    batch.delete(doc.ref);
+                });
+                batch.update(userDocRef, unitUpdates);
+                hasUpdate = true;
+            }
+        } catch (error) {
+            console.error("Error processing queues:", error);
+        }
+
+        if (hasUpdate) {
+            try {
+                await batch.commit();
+            } catch (error) {
+                console.error("Failed to commit background task batch:", error);
+            }
+        }
+    };
+    
+    // Run tasks immediately on profile load, and then set an interval
+    processBackgroundTasks(); 
+    const interval = setInterval(processBackgroundTasks, 60000); // Check every minute
+    return () => clearInterval(interval);
+
+  }, [userProfile]);
 
   const value = { user, userProfile, loading };
 
-  if (loading) {
+  if (loading && (pathname.startsWith('/userdashboard') || pathname.startsWith('/admindashboard'))) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
