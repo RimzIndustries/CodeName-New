@@ -9,10 +9,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { useEffect, useState, useMemo } from 'react';
-import { doc, getDoc, updateDoc, increment, collection, writeBatch, Timestamp, addDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, increment, collection, writeBatch, Timestamp, addDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
+import { differenceInSeconds } from 'date-fns';
 
 interface BuildingCosts {
     residence: number;
@@ -31,6 +32,13 @@ interface BuildingCounts {
     barracks: number;
     mobility: number;
     tambang: number;
+}
+
+interface ConstructionJob {
+    id: string;
+    buildingId: keyof BuildingCounts;
+    amount: number;
+    completionTime: Timestamp;
 }
 
 const defaultBuildingCosts: BuildingCosts = { residence: 1000, farm: 1200, fort: 2500, university: 5000, barracks: 1500, mobility: 1000, tambang: 2000 };
@@ -55,6 +63,32 @@ const buildingNameMap: { [key: string]: string } = {
   tambang: 'Tambang'
 };
 
+function Countdown({ completionTime }: { completionTime: Timestamp }) {
+    const [timeLeft, setTimeLeft] = useState('');
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            const now = new Date();
+            const completion = completionTime.toDate();
+            const secondsRemaining = differenceInSeconds(completion, now);
+
+            if (secondsRemaining <= 0) {
+                setTimeLeft('Selesai');
+                clearInterval(timer);
+            } else {
+                const hours = Math.floor(secondsRemaining / 3600);
+                const minutes = Math.floor((secondsRemaining % 3600) / 60);
+                const seconds = secondsRemaining % 60;
+                setTimeLeft(`${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`);
+            }
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [completionTime]);
+
+    return <span>{timeLeft}</span>;
+}
+
 export default function BuildingsPage() {
   const { user, userProfile } = useAuth();
   const { toast } = useToast();
@@ -66,6 +100,8 @@ export default function BuildingsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isDemolishing, setIsDemolishing] = useState(false);
   const [isDemolishDialogOpen, setIsDemolishDialogOpen] = useState(false);
+  const [constructionQueue, setConstructionQueue] = useState<ConstructionJob[]>([]);
+  const [isLoadingQueue, setIsLoadingQueue] = useState(true);
   
   useEffect(() => {
     const fetchGameSettings = async () => {
@@ -93,17 +129,42 @@ export default function BuildingsPage() {
     fetchGameSettings();
   }, []);
 
+  useEffect(() => {
+    if (!user) return;
+    setIsLoadingQueue(true);
+    const q = query(collection(db, 'constructionQueue'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+        const jobs = querySnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        } as ConstructionJob));
+        jobs.sort((a,b) => a.completionTime.toMillis() - b.completionTime.toMillis());
+        setConstructionQueue(jobs);
+        setIsLoadingQueue(false);
+    }, (error) => {
+        console.error("Error fetching construction queue:", error);
+        toast({ title: "Gagal memuat antrian", variant: "destructive" });
+        setIsLoadingQueue(false);
+    });
+
+    return () => unsubscribe();
+  }, [user, toast]);
+
 
   const ownedBuildings = useMemo(() => {
     return userProfile?.buildings ?? { residence: 0, farm: 0, fort: 0, university: 0, barracks: 0, mobility: 0, tambang: 0 };
   }, [userProfile?.buildings]);
   
-  const landUsed = useMemo(() => {
+  const landUsedByOwned = useMemo(() => {
     return Object.values(ownedBuildings).reduce((acc, count) => acc + count, 0);
   }, [ownedBuildings]);
 
+  const landUsedByQueue = useMemo(() => {
+    return constructionQueue.reduce((acc, job) => acc + job.amount, 0);
+  }, [constructionQueue]);
+  
+  const landUsed = landUsedByOwned + landUsedByQueue;
   const landAvailable = userProfile?.land ?? 0;
-  // Simplified land calculation as queue is not visible on client
   const landRemaining = landAvailable - landUsed;
 
   const handleOrderChange = (buildingId: string, value: string) => {
@@ -159,8 +220,8 @@ export default function BuildingsPage() {
         return;
     }
 
-    if ((landAvailable - landUsed) < totalBuildingsOrdered) {
-        toast({ title: "Tanah tidak cukup", variant: "destructive" });
+    if (landRemaining < totalBuildingsOrdered) {
+        toast({ title: "Tanah tidak cukup", description: `Anda hanya memiliki ${landRemaining.toLocaleString()} tanah tersisa.`, variant: "destructive" });
         setIsLoading(false);
         return;
     }
@@ -190,7 +251,7 @@ export default function BuildingsPage() {
         }
 
         await batch.commit();
-        toast({ title: "Ditambahkan ke Antrian Konstruksi", description: "Bangunan Anda akan dibangun. Penyelesaian akan diproses di backend." });
+        toast({ title: "Ditambahkan ke Antrian Konstruksi", description: "Bangunan Anda sedang dibangun dan akan selesai sesuai waktu yang ditentukan." });
         setOrder({});
     } catch (error) {
         console.error("Error ordering construction:", error);
@@ -256,8 +317,8 @@ export default function BuildingsPage() {
         <Card className="bg-card/50">
           <CardContent className="p-4 text-sm space-y-1">
             <div className="flex justify-between"><span>Total Tanah:</span> <span>{(landAvailable).toLocaleString()}</span></div>
-            <div className="flex justify-between"><span>Tanah Terpakai:</span> <span>{landUsed.toLocaleString()}</span></div>
-            <div className="flex justify-between"><span>Tanah Tersedia untuk Dibangun:</span> <span>{landRemaining.toLocaleString()}</span></div>
+            <div className="flex justify-between"><span>Tanah Terpakai (Dimiliki + Antrian):</span> <span>{landUsed.toLocaleString()}</span></div>
+            <div className="flex justify-between"><span>Tanah Tersedia untuk Dibangun:</span> <span className={landRemaining < 0 ? 'text-destructive' : ''}>{landRemaining.toLocaleString()}</span></div>
           </CardContent>
         </Card>
 
@@ -343,9 +404,36 @@ export default function BuildingsPage() {
         <Separator />
         <div>
             <h3 className="text-lg mb-2 text-center">Antrian Konstruksi</h3>
-            <p className="text-sm text-muted-foreground text-center">Tampilan antrian dinonaktifkan sementara untuk stabilitas. Pesanan Anda sedang diproses di backend.</p>
+            {isLoadingQueue ? (
+                <p className="text-sm text-muted-foreground text-center">Memuat antrian...</p>
+            ) : constructionQueue.length > 0 ? (
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Bangunan</TableHead>
+                            <TableHead className="text-right">Jumlah</TableHead>
+                            <TableHead className="text-right">Selesai Dalam</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {constructionQueue.map(job => (
+                            <TableRow key={job.id}>
+                                <TableCell>{buildingNameMap[job.buildingId]}</TableCell>
+                                <TableCell className="text-right">{job.amount.toLocaleString()}</TableCell>
+                                <TableCell className="text-right">
+                                    <Countdown completionTime={job.completionTime} />
+                                </TableCell>
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+            ) : (
+                <p className="text-sm text-muted-foreground text-center">Tidak ada konstruksi yang sedang berjalan.</p>
+            )}
         </div>
       </CardContent>
     </Card>
   );
 }
+
+    
