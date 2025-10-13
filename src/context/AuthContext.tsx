@@ -205,15 +205,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         // --- Construction & Training Queue Logic ---
         try {
-            const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', userProfile.uid));
-            const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', userProfile.uid));
+            const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', userProfile.uid), where('completionTime', '<=', now));
+            const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', userProfile.uid), where('completionTime', '<=', now));
             
             const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
 
-            const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime <= now);
-            if (completedConstructionJobs.length > 0) {
+            if (!constructionSnapshot.empty) {
                 const buildingUpdates: { [key: string]: any } = {};
-                completedConstructionJobs.forEach(doc => {
+                constructionSnapshot.docs.forEach(doc => {
                     const job = doc.data();
                     buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                     batch.delete(doc.ref);
@@ -222,10 +221,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 hasUpdate = true;
             }
 
-            const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime <= now);
-            if (completedTrainingJobs.length > 0) {
+            if (!trainingSnapshot.empty) {
                 const unitUpdates: { [key: string]: any } = {};
-                completedTrainingJobs.forEach(doc => {
+                trainingSnapshot.docs.forEach(doc => {
                     const job = doc.data();
                     unitUpdates[`units.${job.unitId}`] = increment(job.amount);
                     batch.delete(doc.ref);
