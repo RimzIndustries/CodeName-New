@@ -140,6 +140,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!userProfile || userProfile.role !== 'user') return;
 
     const processBackgroundTasks = async () => {
+        if (!userProfile?.uid) return;
+        
         const userDocRef = doc(db, 'users', userProfile.uid);
         let batch = writeBatch(db);
         let hasUpdate = false;
@@ -154,19 +156,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (diffInHours > 0) {
                 try {
                     const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
-                    const bonusesDocSnap = await getDoc(bonusesDocRef);
                     const buildingEffectsRef = doc(db, 'game-settings', 'building-effects');
-                    const buildingEffectsSnap = await getDoc(buildingEffectsRef);
+                    
+                    const [bonusesDocSnap, buildingEffectsSnap] = await Promise.all([
+                        getDoc(bonusesDocRef),
+                        getDoc(buildingEffectsRef)
+                    ]);
 
                     if (bonusesDocSnap.exists() && buildingEffectsSnap.exists()) {
                         const bonusData = bonusesDocSnap.data();
                         const effectsData = buildingEffectsSnap.data();
 
-                        const hourlyMoneyBonus = bonusData.money || 100;
-                        const hourlyFoodBonus = bonusData.food || 10;
+                        const hourlyMoneyBonus = bonusData.money ?? 100;
+                        const hourlyFoodBonus = bonusData.food ?? 10;
                         
-                        const moneyFromTambang = (userProfile.buildings?.tambang || 0) * (effectsData.tambang?.money || 0);
-                        const foodFromFarm = (userProfile.buildings?.farm || 0) * (effectsData.farm?.food || 0);
+                        const moneyFromTambang = (userProfile.buildings?.tambang ?? 0) * (effectsData.tambang?.money ?? 0);
+                        const foodFromFarm = (userProfile.buildings?.farm ?? 0) * (effectsData.farm?.food ?? 0);
 
                         const totalMoneyBonus = (hourlyMoneyBonus + moneyFromTambang) * diffInHours;
                         const totalFoodBonus = (hourlyFoodBonus + foodFromFarm) * diffInHours;
