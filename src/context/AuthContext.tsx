@@ -60,12 +60,119 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
 });
 
+async function processBackgroundTasksForUser(profile: UserProfile) {
+    if (!profile || profile.role !== 'user') return;
+
+    const userDocRef = doc(db, 'users', profile.uid);
+    const now = Timestamp.now();
+    const batch = writeBatch(db);
+    let hasUpdate = false;
+
+    // --- Hourly Bonus Logic ---
+    if (profile.lastResourceUpdate) {
+        const lastUpdate = (profile.lastResourceUpdate as Timestamp).toDate();
+        const diffInMs = now.toMillis() - lastUpdate.getTime();
+        const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+
+        if (diffInHours > 0) {
+            try {
+                const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
+                const buildingEffectsRef = doc(db, 'game-settings', 'building-effects');
+                
+                const [bonusesDocSnap, buildingEffectsSnap] = await Promise.all([
+                    getDoc(bonusesDocRef),
+                    getDoc(buildingEffectsRef)
+                ]);
+
+                if (bonusesDocSnap.exists() && buildingEffectsSnap.exists()) {
+                    const bonusData = bonusesDocSnap.data();
+                    const effectsData = buildingEffectsSnap.data();
+
+                    const hourlyMoneyBonus = bonusData.money ?? 100;
+                    const hourlyFoodBonus = bonusData.food ?? 10;
+                    
+                    const moneyFromTambang = (profile.buildings?.tambang ?? 0) * (effectsData.tambang?.money ?? 0);
+                    const foodFromFarm = (profile.buildings?.farm ?? 0) * (effectsData.farm?.food ?? 0);
+                    
+                    let unemployedFromBuildings = 0;
+                    if (profile.buildings && effectsData) {
+                        for (const buildingKey in profile.buildings) {
+                            const buildingCount = profile.buildings[buildingKey as keyof BuildingCounts] || 0;
+                            const buildingEffect = effectsData[buildingKey as keyof BuildingCounts];
+                            if (buildingEffect && buildingEffect.unemployed) {
+                                unemployedFromBuildings += buildingCount * buildingEffect.unemployed;
+                            }
+                        }
+                    }
+
+                    const totalMoneyBonus = (hourlyMoneyBonus + moneyFromTambang) * diffInHours;
+                    const totalFoodBonus = (hourlyFoodBonus + foodFromFarm) * diffInHours;
+                    const totalUnemployedBonus = unemployedFromBuildings * diffInHours;
+                    
+                    if(totalMoneyBonus > 0) batch.update(userDocRef, { money: increment(totalMoneyBonus) });
+                    if(totalFoodBonus > 0) batch.update(userDocRef, { food: increment(totalFoodBonus) });
+                    if(totalUnemployedBonus > 0) batch.update(userDocRef, { unemployed: increment(totalUnemployedBonus) });
+                    
+                    hasUpdate = true;
+                }
+            } catch (error) {
+                console.error("Failed to calculate hourly bonus:", error);
+            }
+        }
+    }
+    
+    // --- Construction & Training Queue Logic ---
+    try {
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', profile.uid), where('completionTime', '<=', now));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', profile.uid), where('completionTime', '<=', now));
+        
+        const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
+
+        if (!constructionSnapshot.empty) {
+            const buildingUpdates: { [key: string]: any } = {};
+            constructionSnapshot.forEach(doc => {
+                const job = doc.data();
+                buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
+                batch.delete(doc.ref);
+            });
+            batch.update(userDocRef, buildingUpdates);
+            hasUpdate = true;
+        }
+
+        if (!trainingSnapshot.empty) {
+            const unitUpdates: { [key: string]: any } = {};
+            trainingSnapshot.forEach(doc => {
+                const job = doc.data();
+                unitUpdates[`units.${job.unitId}`] = increment(job.amount);
+                batch.delete(doc.ref);
+            });
+            batch.update(userDocRef, unitUpdates);
+            hasUpdate = true;
+        }
+    } catch (error) {
+        console.error("Error processing queues:", error);
+    }
+    
+    batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
+    hasUpdate = true;
+
+    if (hasUpdate) {
+        try {
+            await batch.commit();
+        } catch (error) {
+            console.error("Failed to commit background task batch:", error);
+        }
+    }
+}
+
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
+  const hasProcessedTasks = useRef(false);
 
   useEffect(() => {
     let unsubscribeFromSnapshot: (() => void) | undefined;
@@ -76,15 +183,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       setLoading(true);
+      hasProcessedTasks.current = false; // Reset task processing flag on auth state change
 
       if (authUser) {
         setUser(authUser);
         const userDocRef = doc(db, 'users', authUser.uid);
         
-        unsubscribeFromSnapshot = onSnapshot(userDocRef, async (userDoc) => {
+        // --- ONE-TIME DATA FETCH & BACKGROUND TASK PROCESSING ---
+        try {
+            const initialDocSnap = await getDoc(userDocRef);
+            if (initialDocSnap.exists()) {
+                const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
+                
+                if (initialProfile.status === 'disabled') {
+                     signOut(auth);
+                     return;
+                }
+                
+                // Run background tasks only once upon login
+                await processBackgroundTasksForUser(initialProfile);
+            }
+        } catch (error) {
+            console.error("Error during initial data processing:", error);
+        }
+
+        // --- REAL-TIME LISTENER FOR UI UPDATES ---
+        unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
           if (userDoc.exists()) {
             const profile = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
-
+            
             if (profile.status === 'disabled') {
               signOut(auth);
               return; 
@@ -92,14 +219,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             
             setUserProfile(profile);
 
-            const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
-            if (isAuthPage) {
-               if (profile.role === 'admin') {
-                  router.push('/admindashboard');
-               } else {
-                  router.push('/userdashboard');
-               }
+            // This logic should only run once after profile is confirmed
+            if (!hasProcessedTasks.current) {
+                const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
+                if (isAuthPage) {
+                   if (profile.role === 'admin') {
+                      router.push('/admindashboard');
+                   } else {
+                      router.push('/userdashboard');
+                   }
+                }
+                hasProcessedTasks.current = true; // Mark tasks as processed
             }
+
           } else {
               setUserProfile(null);
               const isProtectedRoute = pathname.startsWith('/admindashboard') || pathname.startsWith('/userdashboard');
@@ -134,129 +266,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [router, pathname]);
-  
-  // New useEffect for handling background tasks like resource updates and queue processing
-  useEffect(() => {
-    if (!userProfile || userProfile.role !== 'user') return;
-
-    const processBackgroundTasks = async () => {
-        if (!userProfile?.uid) return;
-        
-        const userDocRef = doc(db, 'users', userProfile.uid);
-        const now = Timestamp.now();
-        
-        const batch = writeBatch(db);
-        let hasUpdate = false;
-
-        // --- Hourly Bonus Logic ---
-        if (userProfile.lastResourceUpdate) {
-            const lastUpdate = (userProfile.lastResourceUpdate as Timestamp).toDate();
-            const diffInMs = now.toMillis() - lastUpdate.getTime();
-            const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
-
-            if (diffInHours > 0) {
-                try {
-                    const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
-                    const buildingEffectsRef = doc(db, 'game-settings', 'building-effects');
-                    
-                    const [bonusesDocSnap, buildingEffectsSnap] = await Promise.all([
-                        getDoc(bonusesDocRef),
-                        getDoc(buildingEffectsRef)
-                    ]);
-
-                    if (bonusesDocSnap.exists() && buildingEffectsSnap.exists()) {
-                        const bonusData = bonusesDocSnap.data();
-                        const effectsData = buildingEffectsSnap.data();
-
-                        const hourlyMoneyBonus = bonusData.money ?? 100;
-                        const hourlyFoodBonus = bonusData.food ?? 10;
-                        
-                        const moneyFromTambang = (userProfile.buildings?.tambang ?? 0) * (effectsData.tambang?.money ?? 0);
-                        const foodFromFarm = (userProfile.buildings?.farm ?? 0) * (effectsData.farm?.food ?? 0);
-                        
-                        let unemployedFromBuildings = 0;
-                        if (userProfile.buildings && effectsData) {
-                            for (const buildingKey in userProfile.buildings) {
-                                const buildingCount = userProfile.buildings[buildingKey as keyof BuildingCounts] || 0;
-                                const buildingEffect = effectsData[buildingKey as keyof BuildingCounts];
-                                if (buildingEffect && buildingEffect.unemployed) {
-                                    unemployedFromBuildings += buildingCount * buildingEffect.unemployed;
-                                }
-                            }
-                        }
-
-                        const totalMoneyBonus = (hourlyMoneyBonus + moneyFromTambang) * diffInHours;
-                        const totalFoodBonus = (hourlyFoodBonus + foodFromFarm) * diffInHours;
-                        const totalUnemployedBonus = unemployedFromBuildings * diffInHours;
-                        
-                        if(totalMoneyBonus > 0) batch.update(userDocRef, { money: increment(totalMoneyBonus) });
-                        if(totalFoodBonus > 0) batch.update(userDocRef, { food: increment(totalFoodBonus) });
-                        if(totalUnemployedBonus > 0) batch.update(userDocRef, { unemployed: increment(totalUnemployedBonus) });
-                        
-                        hasUpdate = true;
-                    }
-                } catch (error) {
-                    console.error("Failed to calculate hourly bonus:", error);
-                }
-            }
-        }
-        
-        // --- Construction & Training Queue Logic ---
-        try {
-            const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', userProfile.uid));
-            const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', userProfile.uid));
-            
-            const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
-
-            const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime <= now);
-            if (completedConstructionJobs.length > 0) {
-                const buildingUpdates: { [key: string]: any } = {};
-                completedConstructionJobs.forEach(doc => {
-                    const job = doc.data();
-                    buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
-                    batch.delete(doc.ref);
-                });
-                batch.update(userDocRef, buildingUpdates);
-                hasUpdate = true;
-            }
-
-            const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime <= now);
-            if (completedTrainingJobs.length > 0) {
-                const unitUpdates: { [key: string]: any } = {};
-                completedTrainingJobs.forEach(doc => {
-                    const job = doc.data();
-                    unitUpdates[`units.${job.unitId}`] = increment(job.amount);
-                    batch.delete(doc.ref);
-                });
-                batch.update(userDocRef, unitUpdates);
-                hasUpdate = true;
-            }
-        } catch (error) {
-            console.error("Error processing queues:", error);
-        }
-        
-        // Always update the lastResourceUpdate timestamp to keep it in sync,
-        // even if no bonus was awarded this tick.
-        batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
-        hasUpdate = true;
-
-
-        if (hasUpdate) {
-            try {
-                await batch.commit();
-            } catch (error) {
-                console.error("Failed to commit background task batch:", error);
-            }
-        }
-    };
-    
-    // Run tasks immediately on profile load, and then set an interval
-    processBackgroundTasks(); 
-    const interval = setInterval(processBackgroundTasks, 60000); // Check every minute
-    return () => clearInterval(interval);
-
-  }, [userProfile]);
-
 
   const value = { user, userProfile, loading };
 
