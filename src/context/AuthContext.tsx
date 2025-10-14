@@ -145,7 +145,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const userDocRef = doc(db, 'users', userProfile.uid);
         const now = Timestamp.now();
         
-        // Use a single batch for all updates in this tick
         const batch = writeBatch(db);
         let hasUpdate = false;
 
@@ -194,7 +193,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         if(totalFoodBonus > 0) batch.update(userDocRef, { food: increment(totalFoodBonus) });
                         if(totalUnemployedBonus > 0) batch.update(userDocRef, { unemployed: increment(totalUnemployedBonus) });
                         
-                        batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
                         hasUpdate = true;
                     }
                 } catch (error) {
@@ -236,6 +234,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (error) {
             console.error("Error processing queues:", error);
         }
+        
+        // Always update the lastResourceUpdate timestamp to keep it in sync,
+        // even if no bonus was awarded this tick.
+        batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
+        hasUpdate = true;
+
 
         if (hasUpdate) {
             try {
