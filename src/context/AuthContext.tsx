@@ -202,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     
                     if (initialProfile.status === 'disabled') {
                          signOut(auth);
+                         setLoading(false);
                          return; // Stop processing for disabled users
                     }
                     
@@ -294,4 +295,5 @@ export const useAuth = () => {
   return context;
 };
 
+    
     
