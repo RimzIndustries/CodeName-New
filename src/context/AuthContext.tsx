@@ -128,8 +128,9 @@ async function processBackgroundTasksForUser(profile: UserProfile) {
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
 
-        const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime <= now);
-        const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime <= now);
+        const now_date = now.toDate();
+        const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now_date);
+        const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now_date);
 
 
         if (completedConstructionJobs.length > 0) {
@@ -177,7 +178,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
-  const processedUser = useRef<string | null>(null);
 
   useEffect(() => {
     let unsubscribeFromSnapshot: (() => void) | undefined;
@@ -194,27 +194,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const userDocRef = doc(db, 'users', authUser.uid);
 
         // --- One-Time Background Processing ---
-        if (processedUser.current !== authUser.uid) {
-            try {
-                const initialDocSnap = await getDoc(userDocRef);
-                if (initialDocSnap.exists()) {
-                    const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
-                    
-                    if (initialProfile.status === 'disabled') {
-                         signOut(auth);
-                         setLoading(false);
-                         return; // Stop processing for disabled users
-                    }
-                    
-                    await processBackgroundTasksForUser(initialProfile);
-                    processedUser.current = authUser.uid; // Mark user as processed for this session
+        try {
+            const initialDocSnap = await getDoc(userDocRef);
+            if (initialDocSnap.exists()) {
+                const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
+                
+                if (initialProfile.status === 'disabled') {
+                     signOut(auth);
+                     setLoading(false);
+                     return; // Stop processing for disabled users
                 }
-            } catch (error) {
-                console.error("Error during initial data processing:", error);
+                
+                // This function now only runs ONCE per login, before the listener is attached.
+                await processBackgroundTasksForUser(initialProfile);
             }
+        } catch (error) {
+            console.error("Error during initial data processing:", error);
         }
         
         // --- Real-time Listener for UI Updates ---
+        // This listener is now CLEAN. It only reads data for the UI and does NOT write.
         unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
           if (userDoc.exists()) {
             const profile = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
@@ -254,7 +253,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setUser(null);
         setUserProfile(null);
-        processedUser.current = null; // Reset processed user on logout
         const isProtectedRoute = pathname.startsWith('/admindashboard') || pathname.startsWith('/userdashboard');
         if (isProtectedRoute) {
             router.push('/login');
@@ -294,6 +292,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
-    
-    
