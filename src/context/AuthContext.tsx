@@ -60,10 +60,10 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
 });
 
-async function processBackgroundTasksForUser(profile: UserProfile) {
+async function processBackgroundTasksForUser(uid: string, profile: UserProfile) {
     if (!profile || profile.role !== 'user') return;
 
-    const userDocRef = doc(db, 'users', profile.uid);
+    const userDocRef = doc(db, 'users', uid);
     const now = Timestamp.now();
     const batch = writeBatch(db);
     let hasUpdate = false;
@@ -123,14 +123,15 @@ async function processBackgroundTasksForUser(profile: UserProfile) {
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', profile.uid));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', profile.uid));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
 
         const now_date = now.toDate();
-        const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now_date);
-        const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now_date);
+        
+        const completedConstructionJobs = constructionSnapshot.docs.filter(d => d.data().completionTime.toDate() <= now_date);
+        const completedTrainingJobs = trainingSnapshot.docs.filter(d => d.data().completionTime.toDate() <= now_date);
 
 
         if (completedConstructionJobs.length > 0) {
@@ -178,6 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
+  const processedLogin = useRef(false);
 
   useEffect(() => {
     let unsubscribeFromSnapshot: (() => void) | undefined;
@@ -191,30 +193,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (authUser) {
         setUser(authUser);
-        const userDocRef = doc(db, 'users', authUser.uid);
-
-        // --- One-Time Background Processing ---
-        try {
-            const initialDocSnap = await getDoc(userDocRef);
-            if (initialDocSnap.exists()) {
-                const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
-                
-                if (initialProfile.status === 'disabled') {
-                     signOut(auth);
-                     setLoading(false);
-                     return; // Stop processing for disabled users
-                }
-                
-                // This function now only runs ONCE per login, before the listener is attached.
-                await processBackgroundTasksForUser(initialProfile);
-            }
-        } catch (error) {
-            console.error("Error during initial data processing:", error);
-        }
         
-        // --- Real-time Listener for UI Updates ---
-        // This listener is now CLEAN. It only reads data for the UI and does NOT write.
-        unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
+        // Reset the processed flag on new login
+        processedLogin.current = false;
+        
+        const userDocRef = doc(db, 'users', authUser.uid);
+        
+        unsubscribeFromSnapshot = onSnapshot(userDocRef, async (userDoc) => {
           if (userDoc.exists()) {
             const profile = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
             
@@ -222,6 +207,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               signOut(auth);
               return; 
             }
+            
+            // --- One-Time Background Processing Logic ---
+            if (!processedLogin.current && profile.role === 'user') {
+                processedLogin.current = true; // Mark as processed
+                await processBackgroundTasksForUser(authUser.uid, profile);
+            }
+            // End of one-time logic
             
             setUserProfile(profile);
             
@@ -253,6 +245,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setUser(null);
         setUserProfile(null);
+        processedLogin.current = false; // Reset on logout
         const isProtectedRoute = pathname.startsWith('/admindashboard') || pathname.startsWith('/userdashboard');
         if (isProtectedRoute) {
             router.push('/login');
