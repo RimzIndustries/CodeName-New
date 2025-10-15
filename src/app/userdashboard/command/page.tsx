@@ -13,6 +13,8 @@ import { collection, query, where, onSnapshot, doc, writeBatch, addDoc, serverTi
 import { useToast } from '@/hooks/use-toast';
 import { ArrowLeftRight, Hourglass } from 'lucide-react';
 import type { UserProfile } from '@/context/AuthContext';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { differenceInSeconds } from 'date-fns';
 
 
 interface Target {
@@ -29,6 +31,46 @@ interface UnitCounts {
     elite: number;
     raider: number;
 }
+
+interface AttackJob {
+    id: string;
+    attackerName: string;
+    defenderName: string;
+    arrivalTime: Timestamp;
+}
+
+const unitNameMap: { [key: string]: string } = {
+  attack: 'Pasukan Serang',
+  defense: 'Pasukan Bertahan',
+  elite: 'Pasukan Elit',
+};
+
+function Countdown({ completionTime }: { completionTime: Timestamp }) {
+    const [timeLeft, setTimeLeft] = useState('');
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            const now = new Date();
+            const completion = completionTime.toDate();
+            const secondsRemaining = differenceInSeconds(completion, now);
+
+            if (secondsRemaining <= 0) {
+                setTimeLeft('Tiba');
+                clearInterval(timer);
+            } else {
+                const hours = Math.floor(secondsRemaining / 3600);
+                const minutes = Math.floor((secondsRemaining % 3600) / 60);
+                const seconds = secondsRemaining % 60;
+                setTimeLeft(`${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`);
+            }
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [completionTime]);
+
+    return <span>{timeLeft}</span>;
+}
+
 
 export default function CommandPage() {
     const { user, userProfile } = useAuth();
@@ -50,6 +92,10 @@ export default function CommandPage() {
     const [activeWars, setActiveWars] = useState<any[]>([]);
     const [enemyPrides, setEnemyPrides] = useState<Target[]>([]);
     const [isLoadingWarTargets, setIsLoadingWarTargets] = useState(true);
+    
+    // Attack queue state
+    const [attackQueue, setAttackQueue] = useState<AttackJob[]>([]);
+    const [isLoadingAttackQueue, setIsLoadingAttackQueue] = useState(true);
 
 
     // Fetch potential targets (players)
@@ -130,6 +176,24 @@ export default function CommandPage() {
 
     }, [userProfile?.allianceId]);
 
+    // Fetch attack queue
+    useEffect(() => {
+        if (!user) return;
+        setIsLoadingAttackQueue(true);
+        const q = query(collection(db, 'attackQueue'), where('attackerId', '==', user.uid));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const jobs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttackJob));
+            jobs.sort((a, b) => a.arrivalTime.toMillis() - b.arrivalTime.toMillis());
+            setAttackQueue(jobs);
+            setIsLoadingAttackQueue(false);
+        }, (error) => {
+            console.error("Error fetching attack queue:", error);
+            toast({ title: "Gagal memuat antrian serangan", variant: "destructive" });
+            setIsLoadingAttackQueue(false);
+        });
+        return () => unsubscribe();
+    }, [user, toast]);
+
     const isAtWar = activeWars.length > 0;
 
     const filteredPlayerTargets = useMemo(() => {
@@ -170,9 +234,10 @@ export default function CommandPage() {
         let totalSent = 0;
         for (const unit in troopOrder) {
             const amount = troopOrder[unit];
+            if (amount < 0) return "Jumlah pasukan tidak boleh negatif.";
             totalSent += amount;
             if (amount > (userProfile.units[unit as keyof UnitCounts] ?? 0)) {
-                return `Anda tidak memiliki cukup pasukan ${unit}.`;
+                return `Anda tidak memiliki cukup ${unitNameMap[unit] || unit}.`;
             }
         }
         if (totalSent === 0) {
@@ -181,27 +246,69 @@ export default function CommandPage() {
         return null;
     }
 
+    const launchAttack = async (targetId: string, troops: { [key: string]: number }, attackType: 'player' | 'war') => {
+        if (!user || !userProfile) return;
+
+        const target = [...targets, ...enemyPrides].find(t => t.id === targetId);
+        if (!target) {
+            toast({ title: "Target tidak ditemukan", variant: "destructive" });
+            return;
+        }
+
+        const validationError = validateAttack(troops);
+        if (validationError) {
+            toast({ title: "Pasukan tidak valid", description: validationError, variant: "destructive" });
+            return attackType === 'player' ? setIsAttackingPlayer(false) : setIsAttackingAlliance(false);
+        }
+
+        try {
+            const batch = writeBatch(db);
+            const userRef = doc(db, "users", user.uid);
+            
+            const troopUpdates: { [key: string]: any } = {};
+            for (const unit in troops) {
+                if (troops[unit] > 0) {
+                    troopUpdates[`units.${unit}`] = increment(-troops[unit]);
+                }
+            }
+            batch.update(userRef, troopUpdates);
+
+            const travelTimeMinutes = 60; // 1 hour travel time
+            const arrivalTime = Timestamp.fromMillis(Date.now() + travelTimeMinutes * 60 * 1000);
+
+            const attackJobRef = doc(collection(db, "attackQueue"));
+            batch.set(attackJobRef, {
+                attackerId: user.uid,
+                attackerName: userProfile.prideName,
+                defenderId: targetId,
+                defenderName: target.name,
+                units: troops,
+                arrivalTime: arrivalTime,
+                type: attackType
+            });
+            
+            await batch.commit();
+
+            toast({ title: "Serangan Diluncurkan!", description: `Pasukan Anda sedang bergerak menuju ${target.name}.` });
+            if (attackType === 'player') setPlayerAttackTroops({ attack: 0, defense: 0, elite: 0 });
+            if (attackType === 'war') setAllianceAttackTroops({ attack: 0, defense: 0, elite: 0 });
+
+        } catch (error) {
+            console.error("Error launching attack:", error);
+            toast({ title: "Gagal Melancarkan Serangan", description: "Terjadi kesalahan.", variant: "destructive" });
+        } finally {
+            attackType === 'player' ? setIsAttackingPlayer(false) : setIsAttackingAlliance(false);
+        }
+    };
+
+
     const handlePlayerAttack = () => {
         if (!selectedPlayerTarget) {
             toast({ title: "Target tidak valid", description: "Silakan pilih pride untuk diserang.", variant: "destructive" });
             return;
         }
-
-        const validationError = validateAttack(playerAttackTroops);
-        if (validationError) {
-            toast({ title: "Pasukan tidak valid", description: validationError, variant: "destructive" });
-            return;
-        }
-        
         setIsAttackingPlayer(true);
-        // Placeholder for attack logic
-        setTimeout(() => {
-            toast({
-                title: "Logika Penyerangan Belum Diimplementasikan",
-                description: "Ini adalah placeholder. Tidak ada serangan yang benar-benar terjadi."
-            });
-            setIsAttackingPlayer(false);
-        }, 1500);
+        launchAttack(selectedPlayerTarget, playerAttackTroops, 'player');
     };
     
     const handleAllianceAttack = () => {
@@ -209,22 +316,8 @@ export default function CommandPage() {
             toast({ title: "Target tidak valid", description: "Silakan pilih pride musuh untuk diserang.", variant: "destructive" });
             return;
         }
-
-        const validationError = validateAttack(allianceAttackTroops);
-        if (validationError) {
-            toast({ title: "Pasukan tidak valid", description: validationError, variant: "destructive" });
-            return;
-        }
-
         setIsAttackingAlliance(true);
-        // Placeholder for attack logic
-        setTimeout(() => {
-            toast({
-                title: "Logika Penyerangan Aliansi Belum Diimplementasikan",
-                description: "Ini adalah placeholder. Tidak ada serangan yang benar-benar terjadi."
-            });
-            setIsAttackingAlliance(false);
-        }, 1500);
+        launchAttack(selectedWarTarget, allianceAttackTroops, 'war');
     }
 
     return (
@@ -268,9 +361,9 @@ export default function CommandPage() {
                         </div>
                     </div>
                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {['attack', 'defense', 'elite'].map(unit => (
+                        {['attack', 'elite'].map(unit => (
                             <div key={unit} className="space-y-1">
-                                <Label className="capitalize">Pasukan {unit}</Label>
+                                <Label className="capitalize">{unitNameMap[unit]}</Label>
                                 <div className="flex items-center gap-2">
                                     <Input
                                         type="number"
@@ -326,9 +419,9 @@ export default function CommandPage() {
                         </div>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                         {['attack', 'defense', 'elite'].map(unit => (
+                         {['attack', 'elite'].map(unit => (
                             <div key={unit} className="space-y-1">
-                                <Label className="capitalize">Pasukan {unit}</Label>
+                                <Label className="capitalize">{unitNameMap[unit]}</Label>
                                 <div className="flex items-center gap-2">
                                     <Input
                                         type="number"
@@ -348,6 +441,40 @@ export default function CommandPage() {
                     <Button className="w-full" variant="destructive" onClick={handleAllianceAttack} disabled={isAttackingAlliance || !isAtWar}>
                         {isAttackingAlliance ? "Menyerang..." : "Serang Pride Musuh"}
                     </Button>
+                </CardContent>
+            </Card>
+
+            {/* Attack Queue */}
+            <Card>
+                <CardHeader className="p-4">
+                    <CardTitle className="text-lg">Antrian Serangan</CardTitle>
+                    <CardDescription>Pasukan Anda yang sedang dalam perjalanan.</CardDescription>
+                </CardHeader>
+                <CardContent className="p-4">
+                    {isLoadingAttackQueue ? (
+                        <p className="text-sm text-muted-foreground text-center">Memuat antrian...</p>
+                    ) : attackQueue.length > 0 ? (
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Target</TableHead>
+                                    <TableHead className="text-right">Tiba Dalam</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {attackQueue.map(job => (
+                                    <TableRow key={job.id}>
+                                        <TableCell>{job.defenderName}</TableCell>
+                                        <TableCell className="text-right">
+                                            <Countdown completionTime={job.arrivalTime} />
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    ) : (
+                        <p className="text-sm text-muted-foreground text-center">Tidak ada pasukan yang sedang menyerang.</p>
+                    )}
                 </CardContent>
             </Card>
         </div>
