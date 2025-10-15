@@ -3,7 +3,7 @@
 
 import type { User } from 'firebase/auth';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, onSnapshot, writeBatch, serverTimestamp, getDoc, collection, query, where, getDocs, Timestamp, DocumentData, updateDoc, increment, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, writeBatch, serverTimestamp, getDoc, collection, query, where, getDocs, Timestamp, DocumentData, increment, deleteDoc } from 'firebase/firestore';
 import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
@@ -133,7 +133,6 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         const completedConstructionJobs = constructionSnapshot.docs.filter(d => d.data().completionTime.toDate() <= now_date);
         const completedTrainingJobs = trainingSnapshot.docs.filter(d => d.data().completionTime.toDate() <= now_date);
 
-
         if (completedConstructionJobs.length > 0) {
             const buildingUpdates: { [key: string]: any } = {};
             completedConstructionJobs.forEach(doc => {
@@ -182,88 +181,103 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const backgroundTasksProcessed = useRef(false);
 
   useEffect(() => {
-    const unsubscribeFromAuth = onAuthStateChanged(auth, async (authUser) => {
-      setUser(authUser);
-      if (!authUser) {
+    const unsubscribeFromAuth = onAuthStateChanged(auth, (authUser) => {
+      if (authUser) {
+        setUser(authUser);
+      } else {
+        setUser(null);
         setUserProfile(null);
         setLoading(false);
-        backgroundTasksProcessed.current = false; // Reset on logout
+        backgroundTasksProcessed.current = false;
         const isProtectedRoute = pathname.startsWith('/admindashboard') || pathname.startsWith('/userdashboard');
         if (isProtectedRoute) {
           router.push('/login');
         }
       }
-      // The rest of the logic is now handled in the next useEffect
     });
 
     return () => unsubscribeFromAuth();
   }, [router, pathname]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
     let unsubscribeFromSnapshot: (() => void) | undefined;
-    
-    const setupListenerAndTasks = async () => {
+
+    const setupUserSession = async () => {
       setLoading(true);
       const userDocRef = doc(db, 'users', user.uid);
 
-      // --- One-time background processing ---
-      if (!backgroundTasksProcessed.current) {
-        try {
-          const initialDocSnap = await getDoc(userDocRef);
-          if (initialDocSnap.exists()) {
-            const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
-            if (initialProfile.status !== 'disabled') {
-              if (initialProfile.role === 'user') {
-                await processBackgroundTasksForUser(user.uid, initialProfile);
-              }
-              backgroundTasksProcessed.current = true;
-            } else {
-              // If user is disabled, sign out and stop.
-              signOut(auth);
-              return;
+      try {
+        // Step 1: Perform a one-time read to get the initial state for background processing.
+        const initialDocSnap = await getDoc(userDocRef);
+
+        if (initialDocSnap.exists()) {
+          const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
+
+          // Check if user is disabled.
+          if (initialProfile.status === 'disabled') {
+            await signOut(auth);
+            return; // Stop further processing
+          }
+
+          // Step 2: Run background tasks only ONCE per session.
+          if (!backgroundTasksProcessed.current) {
+            if (initialProfile.role === 'user') {
+              await processBackgroundTasksForUser(user.uid, initialProfile);
             }
+            backgroundTasksProcessed.current = true;
           }
-        } catch (error) {
-          console.error("Error during initial background processing:", error);
-        }
-      }
 
-      // --- Real-time listener for UI updates ---
-      unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
-        if (userDoc.exists()) {
-          const profileData = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
-          
-          if (profileData.status === 'disabled') {
+          // Step 3: Now, set up the real-time listener for UI updates only.
+          // This listener will NOT trigger background tasks.
+          unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
+            if (userDoc.exists()) {
+              const profileData = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
+
+              if (profileData.status === 'disabled') {
+                signOut(auth);
+                return;
+              }
+              
+              setUserProfile(profileData);
+
+              const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
+              if (isAuthPage) {
+                 if (profileData.role === 'admin') {
+                    router.push('/admindashboard');
+                 } else {
+                    router.push('/userdashboard');
+                 }
+              }
+            } else {
+              signOut(auth); // User doc was deleted.
+            }
+            setLoading(false);
+          }, (error) => {
+            console.error("Firestore snapshot error:", error);
             signOut(auth);
-            return;
-          }
-          
-          setUserProfile(profileData);
+            setLoading(false);
+          });
 
-          const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
-          if (isAuthPage) {
-             if (profileData.role === 'admin') {
-                router.push('/admindashboard');
-             } else {
-                router.push('/userdashboard');
-             }
-          }
         } else {
-          // User document deleted while logged in.
-          signOut(auth);
+          // User exists in Auth, but not in Firestore.
+          await signOut(auth);
+          setLoading(false);
         }
+      } catch (error) {
+        console.error("Error setting up user session:", error);
+        await signOut(auth);
         setLoading(false);
-      }, (error) => {
-        console.error("Firestore snapshot error:", error);
-        signOut(auth);
-        setLoading(false);
-      });
+      }
     };
 
-    setupListenerAndTasks();
+    setupUserSession();
 
+    // Cleanup function for the real-time listener.
     return () => {
       if (unsubscribeFromSnapshot) {
         unsubscribeFromSnapshot();
