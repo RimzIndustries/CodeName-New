@@ -157,6 +157,7 @@ async function processBackgroundTasksForUser(profile: UserProfile) {
         console.error("Error processing queues:", error);
     }
     
+    // Always update the lastResourceUpdate timestamp to prevent re-running tasks on every load.
     batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
     hasUpdate = true;
 
@@ -176,7 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
-  const hasProcessedTasks = useRef(false);
+  const processedUser = useRef<string | null>(null);
 
   useEffect(() => {
     let unsubscribeFromSnapshot: (() => void) | undefined;
@@ -187,31 +188,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       setLoading(true);
-      hasProcessedTasks.current = false;
 
       if (authUser) {
         setUser(authUser);
         const userDocRef = doc(db, 'users', authUser.uid);
-        
-        try {
-            const initialDocSnap = await getDoc(userDocRef);
-            if (initialDocSnap.exists()) {
-                const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
-                
-                if (initialProfile.status === 'disabled') {
-                     signOut(auth);
-                     return;
-                }
-                
-                if (!hasProcessedTasks.current) {
-                    await processBackgroundTasksForUser(initialProfile);
-                    hasProcessedTasks.current = true;
-                }
-            }
-        } catch (error) {
-            console.error("Error during initial data processing:", error);
-        }
 
+        // --- One-Time Background Processing ---
+        if (processedUser.current !== authUser.uid) {
+            try {
+                const initialDocSnap = await getDoc(userDocRef);
+                if (initialDocSnap.exists()) {
+                    const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
+                    
+                    if (initialProfile.status === 'disabled') {
+                         signOut(auth);
+                         return; // Stop processing for disabled users
+                    }
+                    
+                    await processBackgroundTasksForUser(initialProfile);
+                    processedUser.current = authUser.uid; // Mark user as processed for this session
+                }
+            } catch (error) {
+                console.error("Error during initial data processing:", error);
+            }
+        }
+        
+        // --- Real-time Listener for UI Updates ---
         unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
           if (userDoc.exists()) {
             const profile = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
@@ -251,6 +253,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setUser(null);
         setUserProfile(null);
+        processedUser.current = null; // Reset processed user on logout
         const isProtectedRoute = pathname.startsWith('/admindashboard') || pathname.startsWith('/userdashboard');
         if (isProtectedRoute) {
             router.push('/login');
