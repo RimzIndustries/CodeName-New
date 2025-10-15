@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, getDoc, addDoc, serverTimestamp, getDocs, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, getDoc, addDoc, serverTimestamp, getDocs, deleteDoc, or } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
@@ -70,6 +70,13 @@ export default function AlliancePage() {
     const [isLogoDialogOpen, setIsLogoDialogOpen] = useState(false);
     const [newLogoUrl, setNewLogoUrl] = useState('');
     const [isSavingLogo, setIsSavingLogo] = useState(false);
+    
+    // War state
+    const [otherAlliances, setOtherAlliances] = useState<Alliance[]>([]);
+    const [warTargetId, setWarTargetId] = useState('');
+    const [isDeclaringWar, setIsDeclaringWar] = useState(false);
+    const [activeWar, setActiveWar] = useState<any | null>(null);
+    const [enemyAlliance, setEnemyAlliance] = useState<Alliance | null>(null);
 
     // Fetch titles
     useEffect(() => {
@@ -148,11 +155,39 @@ export default function AlliancePage() {
             if(myVote) setSelectedCandidate(myVote.candidateId);
             setIsLoading(false);
         });
+        
+        // Fetch other alliances for war declaration
+        const otherAlliancesQuery = query(collection(db, 'alliances'), where('__name__', '!=', allianceId));
+        getDocs(otherAlliancesQuery).then(snapshot => {
+            const alliancesList = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}) as Alliance);
+            setOtherAlliances(alliancesList);
+        });
+
+        // Listen for active wars
+        const warQuery = query(collection(db, 'wars'), where('participants', 'array-contains', allianceId));
+        const warUnsub = onSnapshot(warQuery, async (snapshot) => {
+            if (!snapshot.empty) {
+                const warData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+                setActiveWar(warData);
+                const enemyId = warData.participants.find((p: string) => p !== allianceId);
+                if (enemyId) {
+                    const enemyDoc = await getDoc(doc(db, 'alliances', enemyId));
+                    if (enemyDoc.exists()) {
+                        setEnemyAlliance({ id: enemyDoc.id, ...enemyDoc.data() } as Alliance);
+                    }
+                }
+            } else {
+                setActiveWar(null);
+                setEnemyAlliance(null);
+            }
+        });
+
 
         return () => {
             allianceUnsub();
             membersUnsub();
             votesUnsub();
+            warUnsub();
         };
 
     }, [userProfile?.allianceId, user?.uid]);
@@ -314,6 +349,49 @@ export default function AlliancePage() {
         }
     };
     
+    const handleDeclareWar = async () => {
+        if (!isLeader) {
+            toast({ title: "Aksi Ditolak", description: "Hanya pemimpin aliansi yang dapat mendeklarasikan perang.", variant: "destructive"});
+            return;
+        }
+        if (!warTargetId || !userProfile?.allianceId) {
+            toast({ title: "Target Tidak Valid", description: "Silakan pilih aliansi untuk diajak perang.", variant: "destructive"});
+            return;
+        }
+        if (activeWar) {
+            toast({ title: "Sudah Berperang", description: "Aliansi Anda sudah dalam kondisi perang.", variant: "destructive"});
+            return;
+        }
+
+        setIsDeclaringWar(true);
+        try {
+            // Check if a war already exists between these two alliances
+            const existingWarQuery = query(collection(db, 'wars'), where('participants', 'in', [[userProfile.allianceId, warTargetId], [warTargetId, userProfile.allianceId]]));
+            const existingWarSnapshot = await getDocs(existingWarQuery);
+
+            if (!existingWarSnapshot.empty) {
+                toast({ title: "Perang Sudah Ada", description: "Sudah ada perang yang tercatat antara kedua aliansi ini.", variant: "destructive" });
+                setIsDeclaringWar(false);
+                return;
+            }
+
+            await addDoc(collection(db, 'wars'), {
+                participants: [userProfile.allianceId, warTargetId],
+                declaredBy: userProfile.allianceId,
+                declaredAt: serverTimestamp()
+            });
+
+            const targetAlliance = otherAlliances.find(a => a.id === warTargetId);
+            toast({ title: "Perang Dideklarasikan!", description: `Aliansi Anda sekarang berperang dengan ${targetAlliance?.name}.`});
+            setWarTargetId('');
+        } catch (error) {
+            console.error("Error declaring war:", error);
+            toast({ title: "Gagal Mendeklarasikan Perang", variant: "destructive"});
+        } finally {
+            setIsDeclaringWar(false);
+        }
+    }
+    
 
     if (isLoading) {
         return <Card><CardContent className="p-6 text-center">Memuat data aliansi...</CardContent></Card>
@@ -474,15 +552,63 @@ export default function AlliancePage() {
               <CardDescription>Lihat status perang atau deklarasikan perang baru jika Anda adalah pemimpin.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-                <Alert>
-                    <Wrench className="h-4 w-4" />
-                    <AlertTitle>Fitur Sedang Dalam Perbaikan</AlertTitle>
-                    <AlertDescription>
-                        Manajemen perang dinonaktifkan sementara untuk perbaikan teknis guna mencegah kesalahan.
-                    </AlertDescription>
-                </Alert>
+                {activeWar ? (
+                     <Alert variant="destructive">
+                        <Swords className="h-4 w-4" />
+                        <AlertTitle>Sedang Berperang!</AlertTitle>
+                        <AlertDescription>
+                            Aliansi Anda saat ini sedang berperang dengan <strong>{enemyAlliance?.name || 'aliansi musuh'}</strong>.
+                            Anda dapat menyerang anggota mereka melalui halaman Komando.
+                        </AlertDescription>
+                    </Alert>
+                ) : isLeader ? (
+                     <div className="space-y-4">
+                        <p className="text-sm text-muted-foreground">Sebagai pemimpin, Anda dapat mendeklarasikan perang terhadap aliansi lain.</p>
+                        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                            <Select onValueChange={setWarTargetId} value={warTargetId}>
+                                <SelectTrigger className="w-full sm:w-[250px]">
+                                    <SelectValue placeholder="Pilih Aliansi untuk diperangi..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {otherAlliances.map(a => (
+                                        <SelectItem key={a.id} value={a.id}>{a.name} [{a.tag}]</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                             <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                    <Button variant="destructive" disabled={!warTargetId || isDeclaringWar}>Deklarasikan Perang</Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                        <AlertDialogTitle>Deklarasikan Perang?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                            Apakah Anda yakin ingin mendeklarasikan perang terhadap aliansi yang dipilih? Tindakan ini akan memulai permusuhan terbuka.
+                                        </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                        <AlertDialogCancel>Batal</AlertDialogCancel>
+                                        <AlertDialogAction onClick={handleDeclareWar} disabled={isDeclaringWar}>
+                                            {isDeclaringWar ? "Mendeklarasikan..." : "Ya, Mulai Perang"}
+                                        </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
+                        </div>
+                    </div>
+                ) : (
+                    <Alert>
+                        <Swords className="h-4 w-4" />
+                        <AlertTitle>Status: Damai</AlertTitle>
+                        <AlertDescription>
+                            Aliansi Anda tidak sedang dalam perang. Hanya pemimpin aliansi yang dapat mendeklarasikan perang.
+                        </AlertDescription>
+                    </Alert>
+                )}
           </CardContent>
       </Card>
     </div>
   );
 }
+
+    

@@ -106,7 +106,7 @@ export default function CommandPage() {
         }
         setIsLoadingTargets(true);
 
-        const usersQuery = query(collection(db, 'users'), where('uid', '!=', user.uid));
+        const usersQuery = query(collection(db, 'users'), where('uid', '!=', user.uid), where('role', '==', 'user'));
         
         const unsubscribe = onSnapshot(usersQuery, (snapshot) => {
             const userList = snapshot.docs.map(doc => {
@@ -258,7 +258,9 @@ export default function CommandPage() {
         const validationError = validateAttack(troops);
         if (validationError) {
             toast({ title: "Pasukan tidak valid", description: validationError, variant: "destructive" });
-            return attackType === 'player' ? setIsAttackingPlayer(false) : setIsAttackingAlliance(false);
+            if (attackType === 'player') setIsAttackingPlayer(false);
+            if (attackType === 'war') setIsAttackingAlliance(false);
+            return;
         }
 
         try {
@@ -297,7 +299,8 @@ export default function CommandPage() {
             console.error("Error launching attack:", error);
             toast({ title: "Gagal Melancarkan Serangan", description: "Terjadi kesalahan.", variant: "destructive" });
         } finally {
-            attackType === 'player' ? setIsAttackingPlayer(false) : setIsAttackingAlliance(false);
+            if (attackType === 'player') setIsAttackingPlayer(false);
+            if (attackType === 'war') setIsAttackingAlliance(false);
         }
     };
 
@@ -480,3 +483,5 @@ export default function CommandPage() {
         </div>
     );
 }
+
+    

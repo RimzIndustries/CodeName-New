@@ -350,12 +350,14 @@ export default function AdminDashboardPage() {
 
             const warsList: War[] = await Promise.all(warsSnapshot.docs.map(async (warDoc) => {
                 const warData = warDoc.data();
-                const info1 = await getAllianceInfo(warData.alliance1Id);
-                const info2 = await getAllianceInfo(warData.alliance2Id);
+                const [info1, info2] = await Promise.all([
+                  getAllianceInfo(warData.participants[0]),
+                  getAllianceInfo(warData.participants[1])
+                ]);
                 return {
                     id: warDoc.id,
-                    alliance1Id: warData.alliance1Id,
-                    alliance2Id: warData.alliance2Id,
+                    alliance1Id: warData.participants[0],
+                    alliance2Id: warData.participants[1],
                     alliance1Name: info1?.name,
                     alliance1Tag: info1?.tag,
                     alliance2Name: info2?.name,
@@ -2241,3 +2243,5 @@ export default function AdminDashboardPage() {
     </TooltipProvider>
   );
 }
+
+    
