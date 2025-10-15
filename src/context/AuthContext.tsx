@@ -190,16 +190,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       setLoading(true);
+      processedLogin.current = false;
 
       if (authUser) {
         setUser(authUser);
-        
-        // Reset the processed flag on new login
-        processedLogin.current = false;
-        
         const userDocRef = doc(db, 'users', authUser.uid);
+
+        // Perform one-time processing
+        try {
+            const initialDocSnap = await getDoc(userDocRef);
+            if (initialDocSnap.exists()) {
+                const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
+                 if (initialProfile.status !== 'disabled' && initialProfile.role === 'user') {
+                    await processBackgroundTasksForUser(authUser.uid, initialProfile);
+                }
+            }
+        } catch (error) {
+            console.error("Error during one-time background processing:", error);
+        }
         
-        unsubscribeFromSnapshot = onSnapshot(userDocRef, async (userDoc) => {
+        // Now, set up the real-time listener for UI updates only.
+        unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
           if (userDoc.exists()) {
             const profile = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
             
@@ -208,17 +219,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               return; 
             }
             
-            // --- One-Time Background Processing Logic ---
-            if (!processedLogin.current && profile.role === 'user') {
-                processedLogin.current = true; // Mark as processed
-                await processBackgroundTasksForUser(authUser.uid, profile);
-            }
-            // End of one-time logic
-            
             setUserProfile(profile);
             
             const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
-            if (isAuthPage) {
+            if (isAuthPage && !processedLogin.current) {
+               processedLogin.current = true; // Prevent multiple redirects
                if (profile.role === 'admin') {
                   router.push('/admindashboard');
                } else {
@@ -245,7 +250,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setUser(null);
         setUserProfile(null);
-        processedLogin.current = false; // Reset on logout
         const isProtectedRoute = pathname.startsWith('/admindashboard') || pathname.startsWith('/userdashboard');
         if (isProtectedRoute) {
             router.push('/login');
