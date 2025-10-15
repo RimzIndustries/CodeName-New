@@ -179,92 +179,97 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
-  const processedLogin = useRef(false);
+  const backgroundTasksProcessed = useRef(false);
 
   useEffect(() => {
-    let unsubscribeFromSnapshot: (() => void) | undefined;
-    
     const unsubscribeFromAuth = onAuthStateChanged(auth, async (authUser) => {
-      if (unsubscribeFromSnapshot) {
-        unsubscribeFromSnapshot();
-      }
-      
-      setLoading(true);
-      processedLogin.current = false;
-
-      if (authUser) {
-        setUser(authUser);
-        const userDocRef = doc(db, 'users', authUser.uid);
-
-        // Perform one-time processing
-        try {
-            const initialDocSnap = await getDoc(userDocRef);
-            if (initialDocSnap.exists()) {
-                const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
-                 if (initialProfile.status !== 'disabled' && initialProfile.role === 'user') {
-                    await processBackgroundTasksForUser(authUser.uid, initialProfile);
-                }
-            }
-        } catch (error) {
-            console.error("Error during one-time background processing:", error);
-        }
-        
-        // Now, set up the real-time listener for UI updates only.
-        unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
-          if (userDoc.exists()) {
-            const profile = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
-            
-            if (profile.status === 'disabled') {
-              signOut(auth);
-              return; 
-            }
-            
-            setUserProfile(profile);
-            
-            const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
-            if (isAuthPage && !processedLogin.current) {
-               processedLogin.current = true; // Prevent multiple redirects
-               if (profile.role === 'admin') {
-                  router.push('/admindashboard');
-               } else {
-                  router.push('/userdashboard');
-               }
-            }
-
-          } else {
-              setUserProfile(null);
-              const isProtectedRoute = pathname.startsWith('/admindashboard') || pathname.startsWith('/userdashboard');
-              if (isProtectedRoute) {
-                  router.push('/login');
-              }
-          }
-          setLoading(false);
-        }, (error) => {
-          console.error("Firestore snapshot error:", error);
-          setUser(null);
-          setUserProfile(null);
-          setLoading(false);
-          router.push('/login');
-        });
-
-      } else {
-        setUser(null);
+      setUser(authUser);
+      if (!authUser) {
         setUserProfile(null);
+        setLoading(false);
+        backgroundTasksProcessed.current = false; // Reset on logout
         const isProtectedRoute = pathname.startsWith('/admindashboard') || pathname.startsWith('/userdashboard');
         if (isProtectedRoute) {
-            router.push('/login');
+          router.push('/login');
         }
-        setLoading(false);
       }
+      // The rest of the logic is now handled in the next useEffect
     });
 
+    return () => unsubscribeFromAuth();
+  }, [router, pathname]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let unsubscribeFromSnapshot: (() => void) | undefined;
+    
+    const setupListenerAndTasks = async () => {
+      setLoading(true);
+      const userDocRef = doc(db, 'users', user.uid);
+
+      // --- One-time background processing ---
+      if (!backgroundTasksProcessed.current) {
+        try {
+          const initialDocSnap = await getDoc(userDocRef);
+          if (initialDocSnap.exists()) {
+            const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
+            if (initialProfile.status !== 'disabled') {
+              if (initialProfile.role === 'user') {
+                await processBackgroundTasksForUser(user.uid, initialProfile);
+              }
+              backgroundTasksProcessed.current = true;
+            } else {
+              // If user is disabled, sign out and stop.
+              signOut(auth);
+              return;
+            }
+          }
+        } catch (error) {
+          console.error("Error during initial background processing:", error);
+        }
+      }
+
+      // --- Real-time listener for UI updates ---
+      unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
+        if (userDoc.exists()) {
+          const profileData = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
+          
+          if (profileData.status === 'disabled') {
+            signOut(auth);
+            return;
+          }
+          
+          setUserProfile(profileData);
+
+          const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
+          if (isAuthPage) {
+             if (profileData.role === 'admin') {
+                router.push('/admindashboard');
+             } else {
+                router.push('/userdashboard');
+             }
+          }
+        } else {
+          // User document deleted while logged in.
+          signOut(auth);
+        }
+        setLoading(false);
+      }, (error) => {
+        console.error("Firestore snapshot error:", error);
+        signOut(auth);
+        setLoading(false);
+      });
+    };
+
+    setupListenerAndTasks();
+
     return () => {
-      unsubscribeFromAuth();
       if (unsubscribeFromSnapshot) {
         unsubscribeFromSnapshot();
       }
     };
-  }, [router, pathname]);
+  }, [user, router, pathname]);
 
   const value = { user, userProfile, loading };
 
