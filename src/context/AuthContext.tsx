@@ -123,14 +123,18 @@ async function processBackgroundTasksForUser(profile: UserProfile) {
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', profile.uid), where('completionTime', '<=', now));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', profile.uid), where('completionTime', '<=', now));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', profile.uid));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', profile.uid));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
 
-        if (!constructionSnapshot.empty) {
+        const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime <= now);
+        const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime <= now);
+
+
+        if (completedConstructionJobs.length > 0) {
             const buildingUpdates: { [key: string]: any } = {};
-            constructionSnapshot.forEach(doc => {
+            completedConstructionJobs.forEach(doc => {
                 const job = doc.data();
                 buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                 batch.delete(doc.ref);
@@ -139,9 +143,9 @@ async function processBackgroundTasksForUser(profile: UserProfile) {
             hasUpdate = true;
         }
 
-        if (!trainingSnapshot.empty) {
+        if (completedTrainingJobs.length > 0) {
             const unitUpdates: { [key: string]: any } = {};
-            trainingSnapshot.forEach(doc => {
+            completedTrainingJobs.forEach(doc => {
                 const job = doc.data();
                 unitUpdates[`units.${job.unitId}`] = increment(job.amount);
                 batch.delete(doc.ref);
