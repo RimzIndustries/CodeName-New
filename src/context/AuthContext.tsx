@@ -123,15 +123,14 @@ async function processBackgroundTasksForUser(profile: UserProfile) {
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', profile.uid));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', profile.uid));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', profile.uid), where('completionTime', '<=', now));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', profile.uid), where('completionTime', '<=', now));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
 
-        const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime <= now);
-        if (completedConstructionJobs.length > 0) {
+        if (!constructionSnapshot.empty) {
             const buildingUpdates: { [key: string]: any } = {};
-            completedConstructionJobs.forEach(doc => {
+            constructionSnapshot.forEach(doc => {
                 const job = doc.data();
                 buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                 batch.delete(doc.ref);
@@ -140,10 +139,9 @@ async function processBackgroundTasksForUser(profile: UserProfile) {
             hasUpdate = true;
         }
 
-        const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime <= now);
-        if (completedTrainingJobs.length > 0) {
+        if (!trainingSnapshot.empty) {
             const unitUpdates: { [key: string]: any } = {};
-            completedTrainingJobs.forEach(doc => {
+            trainingSnapshot.forEach(doc => {
                 const job = doc.data();
                 unitUpdates[`units.${job.unitId}`] = increment(job.amount);
                 batch.delete(doc.ref);
@@ -185,13 +183,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       setLoading(true);
-      hasProcessedTasks.current = false; // Reset task processing flag on auth state change
+      hasProcessedTasks.current = false;
 
       if (authUser) {
         setUser(authUser);
         const userDocRef = doc(db, 'users', authUser.uid);
         
-        // --- ONE-TIME DATA FETCH & BACKGROUND TASK PROCESSING ---
         try {
             const initialDocSnap = await getDoc(userDocRef);
             if (initialDocSnap.exists()) {
@@ -202,7 +199,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                      return;
                 }
                 
-                // Run background tasks only once upon login
                 if (!hasProcessedTasks.current) {
                     await processBackgroundTasksForUser(initialProfile);
                     hasProcessedTasks.current = true;
@@ -212,7 +208,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.error("Error during initial data processing:", error);
         }
 
-        // --- REAL-TIME LISTENER FOR UI UPDATES ---
         unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
           if (userDoc.exists()) {
             const profile = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
