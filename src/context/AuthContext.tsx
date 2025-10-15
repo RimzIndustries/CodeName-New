@@ -123,14 +123,15 @@ async function processBackgroundTasksForUser(profile: UserProfile) {
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', profile.uid), where('completionTime', '<=', now));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', profile.uid), where('completionTime', '<=', now));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', profile.uid));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', profile.uid));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
 
-        if (!constructionSnapshot.empty) {
+        const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime <= now);
+        if (completedConstructionJobs.length > 0) {
             const buildingUpdates: { [key: string]: any } = {};
-            constructionSnapshot.forEach(doc => {
+            completedConstructionJobs.forEach(doc => {
                 const job = doc.data();
                 buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                 batch.delete(doc.ref);
@@ -139,9 +140,10 @@ async function processBackgroundTasksForUser(profile: UserProfile) {
             hasUpdate = true;
         }
 
-        if (!trainingSnapshot.empty) {
+        const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime <= now);
+        if (completedTrainingJobs.length > 0) {
             const unitUpdates: { [key: string]: any } = {};
-            trainingSnapshot.forEach(doc => {
+            completedTrainingJobs.forEach(doc => {
                 const job = doc.data();
                 unitUpdates[`units.${job.unitId}`] = increment(job.amount);
                 batch.delete(doc.ref);
@@ -201,7 +203,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
                 
                 // Run background tasks only once upon login
-                await processBackgroundTasksForUser(initialProfile);
+                if (!hasProcessedTasks.current) {
+                    await processBackgroundTasksForUser(initialProfile);
+                    hasProcessedTasks.current = true;
+                }
             }
         } catch (error) {
             console.error("Error during initial data processing:", error);
@@ -218,18 +223,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
             
             setUserProfile(profile);
-
-            // This logic should only run once after profile is confirmed
-            if (!hasProcessedTasks.current) {
-                const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
-                if (isAuthPage) {
-                   if (profile.role === 'admin') {
-                      router.push('/admindashboard');
-                   } else {
-                      router.push('/userdashboard');
-                   }
-                }
-                hasProcessedTasks.current = true; // Mark tasks as processed
+            
+            const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
+            if (isAuthPage) {
+               if (profile.role === 'admin') {
+                  router.push('/admindashboard');
+               } else {
+                  router.push('/userdashboard');
+               }
             }
 
           } else {
@@ -290,5 +291,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
-    
