@@ -254,47 +254,65 @@ export default function AdminDashboardPage() {
         setIsLoadingSettings(true);
         try {
             const settingsDocRef = doc(db, 'game-settings', 'initial-resources');
-            const docSnap = await getDoc(settingsDocRef);
+            const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
+            const costsDocRef = doc(db, 'game-settings', 'game-costs');
+            const timingDocRef = doc(db, 'game-settings', 'timing-rules');
+            const effectsDocRef = doc(db, 'game-settings', 'building-effects');
+            const mechanicsDocRef = doc(db, 'game-settings', 'game-mechanics');
+            const infoDocRef = doc(db, 'game-settings', 'admin-info');
+
+            const [
+              docSnap,
+              bonusesDocSnap,
+              costsDocSnap,
+              timingDocSnap,
+              effectsDocSnap,
+              mechanicsDocSnap,
+              infoDocSnap,
+            ] = await Promise.all([
+              getDoc(settingsDocRef),
+              getDoc(bonusesDocRef),
+              getDoc(costsDocRef),
+              getDoc(timingDocRef),
+              getDoc(effectsDocRef),
+              getDoc(mechanicsDocRef),
+              getDoc(infoDocRef),
+            ]);
+
             if (docSnap.exists()) {
               const data = docSnap.data();
               setInitialMoney(data.money ?? 1000);
               setInitialFood(data.food ?? 500);
               setInitialLand(data.land ?? 100);
             }
-            const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
-            const bonusesDocSnap = await getDoc(bonusesDocRef);
+
             if (bonusesDocSnap.exists()) {
               const data = bonusesDocSnap.data();
               setHourlyMoneyBonus(data.money ?? 100);
               setHourlyFoodBonus(data.food ?? 10);
             }
-            const costsDocRef = doc(db, 'game-settings', 'game-costs');
-            const costsDocSnap = await getDoc(costsDocRef);
+
             if (costsDocSnap.exists()) {
                 const data = costsDocSnap.data();
                 if (data.units) setUnitCosts(data.units);
                 if (data.buildings) setBuildingCosts(data.buildings);
             }
-            const timingDocRef = doc(db, 'game-settings', 'timing-rules');
-            const timingDocSnap = await getDoc(timingDocRef);
+
             if (timingDocSnap.exists()) {
                 const data = timingDocSnap.data();
                 if (data.constructionTimeInHours !== undefined) setConstructionTime(data.constructionTimeInHours);
                 if (data.trainingTimeInHours !== undefined) setTrainingTime(data.trainingTimeInHours);
             }
-            const effectsDocRef = doc(db, 'game-settings', 'building-effects');
-            const effectsDocSnap = await getDoc(effectsDocRef);
+            
             if (effectsDocSnap.exists()) {
                 setBuildingEffects(effectsDocSnap.data() as BuildingEffects);
             }
-            const mechanicsDocRef = doc(db, 'game-settings', 'game-mechanics');
-            const mechanicsDocSnap = await getDoc(mechanicsDocSnap);
+
             if (mechanicsDocSnap.exists()) {
                 const data = mechanicsDocSnap.data();
                 if (data.votingPowerDivisor !== undefined) setVotingPowerDivisor(data.votingPowerDivisor);
             }
-            const infoDocRef = doc(db, 'game-settings', 'admin-info');
-            const infoDocSnap = await getDoc(infoDocRef);
+            
             if (infoDocSnap.exists()) {
               setAdminMessage(infoDocSnap.data().message ?? '');
             }
@@ -2246,7 +2264,5 @@ export default function AdminDashboardPage() {
     </TooltipProvider>
   );
 }
-
-    
 
     
