@@ -127,19 +127,14 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
-
-        const now_date = now.toDate();
         
-        const completedConstructionJobs = constructionSnapshot.docs.filter(d => d.data().completionTime.toDate() <= now_date);
-        const completedTrainingJobs = trainingSnapshot.docs.filter(d => d.data().completionTime.toDate() <= now_date);
-
-        if (completedConstructionJobs.length > 0) {
+        if (!constructionSnapshot.empty) {
             const buildingUpdates: { [key: string]: any } = {};
-            completedConstructionJobs.forEach(doc => {
+            constructionSnapshot.forEach(doc => {
                 const job = doc.data();
                 buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                 batch.delete(doc.ref);
@@ -148,9 +143,9 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             hasUpdate = true;
         }
 
-        if (completedTrainingJobs.length > 0) {
+        if (!trainingSnapshot.empty) {
             const unitUpdates: { [key: string]: any } = {};
-            completedTrainingJobs.forEach(doc => {
+            trainingSnapshot.forEach(doc => {
                 const job = doc.data();
                 unitUpdates[`units.${job.unitId}`] = increment(job.amount);
                 batch.delete(doc.ref);
@@ -164,17 +159,15 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
 
     // --- Attack Queue Logic ---
     try {
-        const attackQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid));
+        const attackQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid), where('arrivalTime', '<=', now));
         const attackSnapshot = await getDocs(attackQuery);
-        const completedAttacks = attackSnapshot.docs.filter(doc => doc.data().arrivalTime.toDate() <= now.toDate());
 
-        for (const attackDoc of completedAttacks) {
+        for (const attackDoc of attackSnapshot.docs) {
             const attackData = attackDoc.data();
             const defenderRef = doc(db, 'users', attackData.defenderId);
             const defenderSnap = await getDoc(defenderRef);
 
             if (!defenderSnap.exists()) {
-                // Target doesn't exist, return troops
                 const unitReturns: { [key: string]: any } = {};
                 for (const unit in attackData.units) {
                     unitReturns[`units.${unit}`] = increment(attackData.units[unit]);
@@ -185,9 +178,8 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             }
 
             const defenderProfile = defenderSnap.data() as UserProfile;
-            const attackerProfile = profile; // Use the profile passed into the function
+            const attackerProfile = profile; 
 
-            // Fetch title and building bonuses
             const titlesSnapshot = await getDocs(collection(db, 'titles'));
             const titles = titlesSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
 
@@ -209,38 +201,36 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             const totalAttackerBonus = attackerTitleBonus + attackerMobilityBonus;
             const totalDefenderBonus = defenderTitleBonus + defenderFortBonus;
 
-            // Calculate total power
             const attackerPower = (attackData.units.attack || 0) * 10 * (1 + totalAttackerBonus / 100) + 
                                   (attackData.units.elite || 0) * 13 * (1 + totalAttackerBonus / 100);
 
             const defenderPower = (defenderProfile.units.defense || 0) * 10 * (1 + totalDefenderBonus / 100) +
                                   (defenderProfile.units.elite || 0) * 5 * (1 + totalDefenderBonus / 100);
 
-            const powerRatio = attackerPower / (defenderPower || 1); // Avoid division by zero
+            const powerRatio = attackerPower / (defenderPower || 1);
 
             let outcomeForAttacker: 'win' | 'loss';
             let attackerLossPercent = 0;
             let defenderLossPercent = 0;
 
-            if (powerRatio > 1.2) { // Decisive win
+            if (powerRatio > 1.2) {
                 outcomeForAttacker = 'win';
                 attackerLossPercent = 0.1;
                 defenderLossPercent = 0.7;
-            } else if (powerRatio > 1) { // Narrow win
+            } else if (powerRatio > 1) {
                 outcomeForAttacker = 'win';
                 attackerLossPercent = 0.3;
                 defenderLossPercent = 0.5;
-            } else if (powerRatio > 0.8) { // Draw / Pyrrhic victory
-                outcomeForAttacker = 'loss'; // Technically a loss as attacker
+            } else if (powerRatio > 0.8) { 
+                outcomeForAttacker = 'loss'; 
                 attackerLossPercent = 0.6;
                 defenderLossPercent = 0.6;
-            } else { // Loss
+            } else {
                 outcomeForAttacker = 'loss';
                 attackerLossPercent = 0.9;
                 defenderLossPercent = 0.2;
             }
             
-            // Calculate losses
             const unitsLostAttacker: Record<string, number> = {};
             const survivingAttackers: Record<string, number> = {};
             for (const unit in attackData.units) {
@@ -250,14 +240,19 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             }
 
             const unitsLostDefender: Record<string, number> = {};
+            const defenderUpdates: { [key: string]: any } = {};
             for (const unit in defenderProfile.units) {
                 const u = unit as keyof UnitCounts;
                 const lost = Math.floor((defenderProfile.units[u] ?? 0) * defenderLossPercent);
                 unitsLostDefender[u] = lost;
-                batch.set(defenderRef, { units: { [u]: increment(-lost) } }, { merge: true });
+                if (lost > 0) {
+                    defenderUpdates[`units.${u}`] = increment(-lost);
+                }
+            }
+            if (Object.keys(defenderUpdates).length > 0) {
+                batch.set(defenderRef, defenderUpdates, { merge: true });
             }
             
-            // Return surviving troops to attacker
             const survivingUpdates: { [key: string]: any } = {};
             for (const unit in survivingAttackers) {
                 if (survivingAttackers[unit] > 0) {
@@ -265,13 +260,12 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 }
             }
             if(Object.keys(survivingUpdates).length > 0) {
-              batch.set(userDocRef, { units: survivingUpdates }, { merge: true });
+              batch.set(userDocRef, survivingUpdates, { merge: true });
             }
 
-            // Calculate plunder
             const resourcesPlundered = { money: 0, food: 0 };
             if (outcomeForAttacker === 'win') {
-                const plunderCapacity = (attackData.units.raider || 0) * 100; // Example capacity
+                const plunderCapacity = (attackData.units.raider || 0) * 100;
                 const moneyPlundered = Math.min(defenderProfile.money * 0.1, plunderCapacity / 2);
                 const foodPlundered = Math.min(defenderProfile.food * 0.1, plunderCapacity / 2);
                 
@@ -290,7 +284,6 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 }
             }
 
-            // Create report
             const reportRef = doc(collection(db, 'reports'));
             batch.set(reportRef, {
                 involvedUsers: [attackerProfile.uid, defenderProfile.uid],
@@ -314,7 +307,6 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         console.error("Error processing attack queue:", error);
     }
     
-    // Always update the lastResourceUpdate timestamp to prevent re-running tasks on every load.
     batch.set(userDocRef, { lastResourceUpdate: serverTimestamp() }, { merge: true });
     hasUpdate = true;
 
@@ -368,63 +360,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userDocRef = doc(db, 'users', user.uid);
 
       try {
-        // Step 1: Perform a one-time read to get the initial state for background processing.
-        const initialDocSnap = await getDoc(userDocRef);
-
-        if (initialDocSnap.exists()) {
-          const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
-
-          // Check if user is disabled.
-          if (initialProfile.status === 'disabled') {
-            await signOut(auth);
-            setLoading(false);
-            router.push('/login');
-            return;
-          }
-
-          // Step 2: Run background tasks only ONCE per session.
-          if (!backgroundTasksProcessed.current) {
+        if (!backgroundTasksProcessed.current) {
+          const initialDocSnap = await getDoc(userDocRef);
+          if (initialDocSnap.exists()) {
+            const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
             if (initialProfile.role === 'user') {
               await processBackgroundTasksForUser(user.uid, initialProfile);
             }
-            backgroundTasksProcessed.current = true;
           }
-
-          // Step 3: Now, set up the real-time listener for UI updates only.
-          unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
-            if (userDoc.exists()) {
-              const profileData = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
-
-              if (profileData.status === 'disabled') {
-                signOut(auth);
-                return;
-              }
-              
-              setUserProfile(profileData);
-
-              const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
-              if (isAuthPage) {
-                 if (profileData.role === 'admin') {
-                    router.push('/admindashboard');
-                 } else {
-                    router.push('/userdashboard');
-                 }
-              }
-            } else {
-              signOut(auth); // User doc was deleted.
-            }
-            setLoading(false);
-          }, (error) => {
-            console.error("Firestore snapshot error:", error);
-            signOut(auth);
-            setLoading(false);
-          });
-
-        } else {
-          // User exists in Auth, but not in Firestore.
-          await signOut(auth);
-          setLoading(false);
+          backgroundTasksProcessed.current = true;
         }
+        
+        unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
+          if (userDoc.exists()) {
+            const profileData = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
+
+            if (profileData.status === 'disabled') {
+              signOut(auth);
+              return;
+            }
+            
+            setUserProfile(profileData);
+
+            const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
+            if (isAuthPage) {
+               if (profileData.role === 'admin') {
+                  router.push('/admindashboard');
+               } else {
+                  router.push('/userdashboard');
+               }
+            }
+          } else {
+            signOut(auth);
+          }
+          setLoading(false);
+        }, (error) => {
+          console.error("Firestore snapshot error:", error);
+          signOut(auth);
+          setLoading(false);
+        });
+
       } catch (error) {
         console.error("Error setting up user session:", error);
         await signOut(auth);
@@ -434,7 +409,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setupUserSession();
 
-    // Cleanup function for the real-time listener.
     return () => {
       if (unsubscribeFromSnapshot) {
         unsubscribeFromSnapshot();
@@ -465,5 +439,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
-    
