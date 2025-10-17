@@ -3,7 +3,7 @@
 
 import type { User } from 'firebase/auth';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, onSnapshot, writeBatch, serverTimestamp, getDoc, collection, query, where, getDocs, Timestamp, DocumentData, increment, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, writeBatch, serverTimestamp, getDoc, collection, query, where, getDocs, Timestamp, DocumentData, increment, deleteDoc, setDoc } from 'firebase/firestore';
 import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
@@ -87,6 +87,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 if (bonusesDocSnap.exists() && buildingEffectsSnap.exists()) {
                     const bonusData = bonusesDocSnap.data();
                     const effectsData = buildingEffectsSnap.data();
+                    const updates: DocumentData = {};
 
                     const hourlyMoneyBonus = bonusData.money ?? 100;
                     const hourlyFoodBonus = bonusData.food ?? 10;
@@ -109,11 +110,14 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     const totalFoodBonus = (hourlyFoodBonus + foodFromFarm) * diffInHours;
                     const totalUnemployedBonus = unemployedFromBuildings * diffInHours;
                     
-                    if(totalMoneyBonus > 0) batch.update(userDocRef, { money: increment(totalMoneyBonus) });
-                    if(totalFoodBonus > 0) batch.update(userDocRef, { food: increment(totalFoodBonus) });
-                    if(totalUnemployedBonus > 0) batch.update(userDocRef, { unemployed: increment(totalUnemployedBonus) });
+                    if(totalMoneyBonus > 0) updates.money = increment(totalMoneyBonus);
+                    if(totalFoodBonus > 0) updates.food = increment(totalFoodBonus);
+                    if(totalUnemployedBonus > 0) updates.unemployed = increment(totalUnemployedBonus);
                     
-                    hasUpdate = true;
+                    if (Object.keys(updates).length > 0) {
+                       batch.set(userDocRef, updates, { merge: true });
+                       hasUpdate = true;
+                    }
                 }
             } catch (error) {
                 console.error("Failed to calculate hourly bonus:", error);
@@ -140,7 +144,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                 batch.delete(doc.ref);
             });
-            batch.update(userDocRef, buildingUpdates);
+            batch.set(userDocRef, buildingUpdates, { merge: true });
             hasUpdate = true;
         }
 
@@ -151,7 +155,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 unitUpdates[`units.${job.unitId}`] = increment(job.amount);
                 batch.delete(doc.ref);
             });
-            batch.update(userDocRef, unitUpdates);
+            batch.set(userDocRef, unitUpdates, { merge: true });
             hasUpdate = true;
         }
     } catch (error) {
@@ -175,7 +179,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 for (const unit in attackData.units) {
                     unitReturns[`units.${unit}`] = increment(attackData.units[unit]);
                 }
-                batch.update(userDocRef, unitReturns);
+                batch.set(userDocRef, unitReturns, { merge: true });
                 batch.delete(attackDoc.ref);
                 continue;
             }
@@ -197,14 +201,20 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
 
             const buildingEffectsSnap = await getDoc(doc(db, 'game-settings', 'building-effects'));
             const fortDefenseBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data().fort?.defenseBonus ?? 0 : 0;
+            const mobilityAttackBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data().mobility?.attackBonus ?? 0 : 0;
+
+            const attackerMobilityBonus = (attackerProfile.buildings?.mobility ?? 0) * mobilityAttackBonusPerBuilding;
             const defenderFortBonus = (defenderProfile.buildings?.fort ?? 0) * fortDefenseBonusPerBuilding;
+            
+            const totalAttackerBonus = attackerTitleBonus + attackerMobilityBonus;
+            const totalDefenderBonus = defenderTitleBonus + defenderFortBonus;
 
             // Calculate total power
-            const attackerPower = (attackData.units.attack || 0) * 10 * (1 + attackerTitleBonus / 100) + 
-                                  (attackData.units.elite || 0) * 13 * (1 + attackerTitleBonus / 100);
+            const attackerPower = (attackData.units.attack || 0) * 10 * (1 + totalAttackerBonus / 100) + 
+                                  (attackData.units.elite || 0) * 13 * (1 + totalAttackerBonus / 100);
 
-            const defenderPower = (defenderProfile.units.defense || 0) * 10 * (1 + (defenderTitleBonus + defenderFortBonus) / 100) +
-                                  (defenderProfile.units.elite || 0) * 5 * (1 + (defenderTitleBonus + defenderFortBonus) / 100);
+            const defenderPower = (defenderProfile.units.defense || 0) * 10 * (1 + totalDefenderBonus / 100) +
+                                  (defenderProfile.units.elite || 0) * 5 * (1 + totalDefenderBonus / 100);
 
             const powerRatio = attackerPower / (defenderPower || 1); // Avoid division by zero
 
@@ -244,7 +254,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 const u = unit as keyof UnitCounts;
                 const lost = Math.floor((defenderProfile.units[u] ?? 0) * defenderLossPercent);
                 unitsLostDefender[u] = lost;
-                batch.update(defenderRef, { [`units.${u}`]: increment(-lost) });
+                batch.set(defenderRef, { units: { [u]: increment(-lost) } }, { merge: true });
             }
             
             // Return surviving troops to attacker
@@ -254,7 +264,9 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     survivingUpdates[`units.${unit}`] = increment(survivingAttackers[unit]);
                 }
             }
-            batch.update(userDocRef, survivingUpdates);
+            if(Object.keys(survivingUpdates).length > 0) {
+              batch.set(userDocRef, { units: survivingUpdates }, { merge: true });
+            }
 
             // Calculate plunder
             const resourcesPlundered = { money: 0, food: 0 };
@@ -266,14 +278,16 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 resourcesPlundered.money = Math.floor(moneyPlundered);
                 resourcesPlundered.food = Math.floor(foodPlundered);
 
-                batch.update(defenderRef, { 
-                    money: increment(-resourcesPlundered.money),
-                    food: increment(-resourcesPlundered.food)
-                });
-                batch.update(userDocRef, { 
-                    money: increment(resourcesPlundered.money),
-                    food: increment(resourcesPlundered.food)
-                });
+                if (resourcesPlundered.money > 0 || resourcesPlundered.food > 0) {
+                    batch.set(defenderRef, { 
+                        money: increment(-resourcesPlundered.money),
+                        food: increment(-resourcesPlundered.food)
+                    }, { merge: true });
+                    batch.set(userDocRef, { 
+                        money: increment(resourcesPlundered.money),
+                        food: increment(resourcesPlundered.food)
+                    }, { merge: true });
+                }
             }
 
             // Create report
@@ -301,7 +315,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     }
     
     // Always update the lastResourceUpdate timestamp to prevent re-running tasks on every load.
-    batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
+    batch.set(userDocRef, { lastResourceUpdate: serverTimestamp() }, { merge: true });
     hasUpdate = true;
 
     if (hasUpdate) {
@@ -363,7 +377,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Check if user is disabled.
           if (initialProfile.status === 'disabled') {
             await signOut(auth);
-            return; // Stop further processing
+            setLoading(false);
+            router.push('/login');
+            return;
           }
 
           // Step 2: Run background tasks only ONCE per session.
@@ -375,7 +391,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
 
           // Step 3: Now, set up the real-time listener for UI updates only.
-          // This listener will NOT trigger background tasks.
           unsubscribeFromSnapshot = onSnapshot(userDocRef, (userDoc) => {
             if (userDoc.exists()) {
               const profileData = { uid: userDoc.id, ...userDoc.data() } as UserProfile;
@@ -450,3 +465,5 @@ export const useAuth = () => {
   }
   return context;
 };
+
+    
