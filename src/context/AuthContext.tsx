@@ -157,6 +157,148 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     } catch (error) {
         console.error("Error processing queues:", error);
     }
+
+    // --- Attack Queue Logic ---
+    try {
+        const attackQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid));
+        const attackSnapshot = await getDocs(attackQuery);
+        const completedAttacks = attackSnapshot.docs.filter(doc => doc.data().arrivalTime.toDate() <= now.toDate());
+
+        for (const attackDoc of completedAttacks) {
+            const attackData = attackDoc.data();
+            const defenderRef = doc(db, 'users', attackData.defenderId);
+            const defenderSnap = await getDoc(defenderRef);
+
+            if (!defenderSnap.exists()) {
+                // Target doesn't exist, return troops
+                const unitReturns: { [key: string]: any } = {};
+                for (const unit in attackData.units) {
+                    unitReturns[`units.${unit}`] = increment(attackData.units[unit]);
+                }
+                batch.update(userDocRef, unitReturns);
+                batch.delete(attackDoc.ref);
+                continue;
+            }
+
+            const defenderProfile = defenderSnap.data() as UserProfile;
+            const attackerProfile = profile; // Use the profile passed into the function
+
+            // Fetch title and building bonuses
+            const titlesSnapshot = await getDocs(collection(db, 'titles'));
+            const titles = titlesSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+
+            const getBonus = (user: UserProfile, type: 'attack' | 'defense' | 'resource') => {
+                const title = [...titles].reverse().find(t => (user.pride ?? 0) >= (t as any).prideRequired);
+                return title ? (title as any)[`${type}Bonus`] ?? 0 : 0;
+            };
+
+            const attackerTitleBonus = getBonus(attackerProfile, 'attack');
+            const defenderTitleBonus = getBonus(defenderProfile, 'defense');
+
+            const buildingEffectsSnap = await getDoc(doc(db, 'game-settings', 'building-effects'));
+            const fortDefenseBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data().fort?.defenseBonus ?? 0 : 0;
+            const defenderFortBonus = (defenderProfile.buildings?.fort ?? 0) * fortDefenseBonusPerBuilding;
+
+            // Calculate total power
+            const attackerPower = (attackData.units.attack || 0) * 10 * (1 + attackerTitleBonus / 100) + 
+                                  (attackData.units.elite || 0) * 13 * (1 + attackerTitleBonus / 100);
+
+            const defenderPower = (defenderProfile.units.defense || 0) * 10 * (1 + (defenderTitleBonus + defenderFortBonus) / 100) +
+                                  (defenderProfile.units.elite || 0) * 5 * (1 + (defenderTitleBonus + defenderFortBonus) / 100);
+
+            const powerRatio = attackerPower / (defenderPower || 1); // Avoid division by zero
+
+            let outcomeForAttacker: 'win' | 'loss';
+            let attackerLossPercent = 0;
+            let defenderLossPercent = 0;
+
+            if (powerRatio > 1.2) { // Decisive win
+                outcomeForAttacker = 'win';
+                attackerLossPercent = 0.1;
+                defenderLossPercent = 0.7;
+            } else if (powerRatio > 1) { // Narrow win
+                outcomeForAttacker = 'win';
+                attackerLossPercent = 0.3;
+                defenderLossPercent = 0.5;
+            } else if (powerRatio > 0.8) { // Draw / Pyrrhic victory
+                outcomeForAttacker = 'loss'; // Technically a loss as attacker
+                attackerLossPercent = 0.6;
+                defenderLossPercent = 0.6;
+            } else { // Loss
+                outcomeForAttacker = 'loss';
+                attackerLossPercent = 0.9;
+                defenderLossPercent = 0.2;
+            }
+            
+            // Calculate losses
+            const unitsLostAttacker: Record<string, number> = {};
+            const survivingAttackers: Record<string, number> = {};
+            for (const unit in attackData.units) {
+                const lost = Math.floor(attackData.units[unit] * attackerLossPercent);
+                unitsLostAttacker[unit] = lost;
+                survivingAttackers[unit] = attackData.units[unit] - lost;
+            }
+
+            const unitsLostDefender: Record<string, number> = {};
+            for (const unit in defenderProfile.units) {
+                const u = unit as keyof UnitCounts;
+                const lost = Math.floor((defenderProfile.units[u] ?? 0) * defenderLossPercent);
+                unitsLostDefender[u] = lost;
+                batch.update(defenderRef, { [`units.${u}`]: increment(-lost) });
+            }
+            
+            // Return surviving troops to attacker
+            const survivingUpdates: { [key: string]: any } = {};
+            for (const unit in survivingAttackers) {
+                if (survivingAttackers[unit] > 0) {
+                    survivingUpdates[`units.${unit}`] = increment(survivingAttackers[unit]);
+                }
+            }
+            batch.update(userDocRef, survivingUpdates);
+
+            // Calculate plunder
+            const resourcesPlundered = { money: 0, food: 0 };
+            if (outcomeForAttacker === 'win') {
+                const plunderCapacity = (attackData.units.raider || 0) * 100; // Example capacity
+                const moneyPlundered = Math.min(defenderProfile.money * 0.1, plunderCapacity / 2);
+                const foodPlundered = Math.min(defenderProfile.food * 0.1, plunderCapacity / 2);
+                
+                resourcesPlundered.money = Math.floor(moneyPlundered);
+                resourcesPlundered.food = Math.floor(foodPlundered);
+
+                batch.update(defenderRef, { 
+                    money: increment(-resourcesPlundered.money),
+                    food: increment(-resourcesPlundered.food)
+                });
+                batch.update(userDocRef, { 
+                    money: increment(resourcesPlundered.money),
+                    food: increment(resourcesPlundered.food)
+                });
+            }
+
+            // Create report
+            const reportRef = doc(collection(db, 'reports'));
+            batch.set(reportRef, {
+                involvedUsers: [attackerProfile.uid, defenderProfile.uid],
+                attackerId: attackerProfile.uid,
+                defenderId: defenderProfile.uid,
+                attackerName: attackerProfile.prideName,
+                defenderName: defenderProfile.prideName,
+                outcomeForAttacker: outcomeForAttacker,
+                unitsLostAttacker,
+                unitsLostDefender,
+                resourcesPlundered,
+                timestamp: serverTimestamp(),
+                readBy: { [attackerProfile.uid]: false, [defenderProfile.uid]: false }
+            });
+
+            batch.delete(attackDoc.ref);
+            hasUpdate = true;
+        }
+
+    } catch (error) {
+        console.error("Error processing attack queue:", error);
+    }
     
     // Always update the lastResourceUpdate timestamp to prevent re-running tasks on every load.
     batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
