@@ -106,19 +106,22 @@ export default function CommandPage() {
         }
         setIsLoadingTargets(true);
 
-        const usersQuery = query(collection(db, 'users'), where('uid', '!=', user.uid), where('role', '==', 'user'));
+        // Query for all users with the 'user' role
+        const usersQuery = query(collection(db, 'users'), where('role', '==', 'user'));
         
         const unsubscribe = onSnapshot(usersQuery, (snapshot) => {
-            const userList = snapshot.docs.map(doc => {
-                const data = doc.data();
-                return {
-                    id: doc.id,
-                    name: data.prideName || 'Unknown Pride',
-                    details: data.province || 'Unknown Province',
-                    province: data.province,
-                    allianceId: data.allianceId,
-                };
-            });
+            const userList = snapshot.docs
+                .filter(doc => doc.id !== user.uid) // Filter out the current user client-side
+                .map(doc => {
+                    const data = doc.data();
+                    return {
+                        id: doc.id,
+                        name: data.prideName || 'Unknown Pride',
+                        details: data.province || 'Unknown Province',
+                        province: data.province,
+                        allianceId: data.allianceId,
+                    };
+                });
             setTargets(userList);
             setIsLoadingTargets(false);
         }, (error) => {
@@ -484,4 +487,3 @@ export default function CommandPage() {
     );
 }
 
-    
