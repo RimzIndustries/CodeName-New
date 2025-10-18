@@ -23,6 +23,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { getGameAdvice, type GameAdviceInput, type GameAdviceOutput } from '@/ai/flows/game-advice-flow';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // Interface untuk data pengguna untuk meningkatkan keamanan tipe
 interface DisplayUser {
@@ -36,6 +37,7 @@ interface DisplayUser {
   pride?: number;
   province?: string;
   zodiac?: string;
+  allianceId?: string | null;
   [key: string]: any; 
 }
 
@@ -954,6 +956,7 @@ export default function AdminDashboardPage() {
       prideName: user.prideName,
       coordinates: user.coordinates ?? { x: 0, y: 0 },
       pride: user.pride ?? 0,
+      allianceId: user.allianceId ?? null,
     });
     setIsEditUserDialogOpen(true);
   };
@@ -975,6 +978,7 @@ export default function AdminDashboardPage() {
         prideName: editUserFormData.prideName,
         coordinates: newCoordinates,
         pride: Number(editUserFormData.pride ?? 0),
+        allianceId: editUserFormData.allianceId ?? null,
       };
 
       await updateDoc(userRef, updatedData);
@@ -2251,6 +2255,25 @@ export default function AdminDashboardPage() {
                     required 
                   />
                 </div>
+            </div>
+            <div className="grid gap-2">
+                <Label htmlFor="edit-alliance">Aliansi</Label>
+                <Select
+                    value={editUserFormData.allianceId ?? 'none'}
+                    onValueChange={(value) => setEditUserFormData(prev => ({ ...prev, allianceId: value === 'none' ? null : value }))}
+                >
+                    <SelectTrigger id="edit-alliance">
+                        <SelectValue placeholder="Pilih Aliansi..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="none">Tidak Ada Aliansi</SelectItem>
+                        {alliances.map(alliance => (
+                            <SelectItem key={alliance.id} value={alliance.id}>
+                                {alliance.name} [{alliance.tag}]
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsEditUserDialogOpen(false)}>Batal</Button>
