@@ -131,17 +131,27 @@ export default function RegisterPage() {
 
       // AuthProvider will handle redirection based on role
     } catch (error: any) {
-      console.error("Registration failed:", error); // Log the full error
       let description = "Gagal membuat akun. Silakan coba lagi.";
+      let isHandledError = false;
+
       if (error.code === 'auth/email-already-in-use') {
-          description = "Email ini sudah terdaftar. Silakan masuk atau gunakan email yang berbeda.";
+        description = "Email ini sudah terdaftar. Silakan masuk atau gunakan email yang berbeda.";
+        isHandledError = true;
       } else if (error.code === 'auth/weak-password') {
-          description = "Kata sandi terlalu lemah. Harap berikan kata sandi yang lebih kuat (minimal 6 karakter).";
+        description = "Kata sandi terlalu lemah. Harap berikan kata sandi yang lebih kuat (minimal 6 karakter).";
+        isHandledError = true;
       } else if (error.code === 'auth/invalid-email') {
-          description = "Format email tidak valid. Silakan periksa kembali email Anda.";
+        description = "Format email tidak valid. Silakan periksa kembali email Anda.";
+        isHandledError = true;
       } else if (error.code === 'auth/invalid-api-key') {
-          description = "Kunci API Firebase tidak valid. Harap periksa konfigurasi Anda.";
+        description = "Kunci API Firebase tidak valid. Harap periksa konfigurasi Anda.";
+        isHandledError = true;
       }
+
+      if (!isHandledError) {
+        console.error("Registration failed:", error);
+      }
+      
       toast({
         title: "Kesalahan Pendaftaran",
         description: description,
