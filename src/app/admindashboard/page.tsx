@@ -2113,7 +2113,7 @@ export default function AdminDashboardPage() {
                           <AlertDialogHeader>
                             <AlertDialogTitle>Reset Semua Data Pemain?</AlertDialogTitle>
                             <AlertDialogDescription>
-                               Tindakan ini akan mengatur ulang semua data game (sumber daya, pasukan, bangunan) untuk semua pemain non-admin ke status awal. Ini TIDAK akan menghapus akun otentikasi mereka atau mengeluarkan mereka dari aliansi.
+                               Tindakan ini akan mengatur ulang semua data game (sumber daya, pasukan, bangunan, keanggotaan aliansi) untuk semua pemain non-admin ke status awal. Ini TIDAK akan menghapus akun otentikasi mereka.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
