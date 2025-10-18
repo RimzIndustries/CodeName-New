@@ -167,11 +167,16 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
 
     // --- Attack Queue Logic ---
     try {
-        const attackQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid), where('arrivalTime', '<=', now));
+        const attackQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid));
         const attackSnapshot = await getDocs(attackQuery);
 
         for (const attackDoc of attackSnapshot.docs) {
             const attackData = attackDoc.data();
+            // Filter client-side
+            if (attackData.arrivalTime > now) {
+                continue;
+            }
+            
             const defenderRef = doc(db, 'users', attackData.defenderId);
             const defenderSnap = await getDoc(defenderRef);
 
