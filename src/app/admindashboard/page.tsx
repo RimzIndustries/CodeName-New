@@ -1756,22 +1756,27 @@ export default function AdminDashboardPage() {
                                   <Separator />
                                   <form onSubmit={handleAddAlliance} className="space-y-4">
                                       <h3 className="text-lg">Buat Aliansi Baru</h3>
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                                          <div className="grid gap-2">
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                          <div className="grid gap-2 sm:col-span-2">
                                               <Label htmlFor="alliance-name">Nama Aliansi</Label>
                                               <Input id="alliance-name" value={newAllianceName} onChange={e => setNewAllianceName(e.target.value)} required />
                                           </div>
-                                          <div className="grid gap-2">
+                                          <div className="grid gap-2 sm:col-span-2">
                                               <Label htmlFor="alliance-tag">Tag Aliansi</Label>
                                               <Input id="alliance-tag" value={newAllianceTag} onChange={e => setNewAllianceTag(e.target.value)} required maxLength={200} />
                                           </div>
-                                          <div className="grid gap-2">
-                                              <Label htmlFor="alliance-x">Koordinat X</Label>
-                                              <Input id="alliance-x" type="number" value={newAllianceX} onChange={e => setNewAllianceX(Number(e.target.value))} required />
-                                          </div>
-                                          <div className="grid gap-2">
-                                              <Label htmlFor="alliance-y">Koordinat Y</Label>
-                                              <Input id="alliance-y" type="number" value={newAllianceY} onChange={e => setNewAllianceY(Number(e.target.value))} required />
+                                          <div className="border p-4 rounded-md sm:col-span-2">
+                                              <Label className="text-sm font-medium">Lokasi</Label>
+                                              <div className="grid grid-cols-2 gap-4 mt-2">
+                                                  <div className="grid gap-2">
+                                                      <Label htmlFor="alliance-x" className="text-xs text-muted-foreground">Koordinat X</Label>
+                                                      <Input id="alliance-x" type="number" value={newAllianceX} onChange={e => setNewAllianceX(Number(e.target.value))} required />
+                                                  </div>
+                                                  <div className="grid gap-2">
+                                                      <Label htmlFor="alliance-y" className="text-xs text-muted-foreground">Koordinat Y</Label>
+                                                      <Input id="alliance-y" type="number" value={newAllianceY} onChange={e => setNewAllianceY(Number(e.target.value))} required />
+                                                  </div>
+                                              </div>
                                           </div>
                                       </div>
                                       <Button type="submit" className="w-full sm:w-auto" disabled={isSavingAlliance}>
@@ -2287,5 +2292,3 @@ export default function AdminDashboardPage() {
     </TooltipProvider>
   );
 }
-
-    
