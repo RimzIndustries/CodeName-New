@@ -127,31 +127,39 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
         
         if (!constructionSnapshot.empty) {
             const buildingUpdates: { [key: string]: any } = {};
             constructionSnapshot.forEach(doc => {
-                const job = doc.data();
-                buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
-                batch.delete(doc.ref);
+                if (doc.data().completionTime <= now) {
+                    const job = doc.data();
+                    buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
+                    batch.delete(doc.ref);
+                }
             });
-            batch.set(userDocRef, buildingUpdates, { merge: true });
-            hasUpdate = true;
+             if (Object.keys(buildingUpdates).length > 0) {
+                batch.set(userDocRef, buildingUpdates, { merge: true });
+                hasUpdate = true;
+            }
         }
 
         if (!trainingSnapshot.empty) {
             const unitUpdates: { [key: string]: any } = {};
             trainingSnapshot.forEach(doc => {
-                const job = doc.data();
-                unitUpdates[`units.${job.unitId}`] = increment(job.amount);
-                batch.delete(doc.ref);
+                 if (doc.data().completionTime <= now) {
+                    const job = doc.data();
+                    unitUpdates[`units.${job.unitId}`] = increment(job.amount);
+                    batch.delete(doc.ref);
+                }
             });
-            batch.set(userDocRef, unitUpdates, { merge: true });
-            hasUpdate = true;
+            if (Object.keys(unitUpdates).length > 0) {
+                batch.set(userDocRef, unitUpdates, { merge: true });
+                hasUpdate = true;
+            }
         }
     } catch (error) {
         console.error("Error processing queues:", error);
