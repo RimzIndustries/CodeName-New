@@ -127,27 +127,29 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
         
-        if (!constructionSnapshot.empty) {
+        const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime <= now);
+        if (completedConstructionJobs.length > 0) {
             const buildingUpdates: { [key: string]: any } = {};
-            constructionSnapshot.forEach(doc => {
+            completedConstructionJobs.forEach(doc => {
                 const job = doc.data();
                 buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                 batch.delete(doc.ref);
             });
-             if (Object.keys(buildingUpdates).length > 0) {
+            if (Object.keys(buildingUpdates).length > 0) {
                 batch.set(userDocRef, buildingUpdates, { merge: true });
                 hasUpdate = true;
             }
         }
 
-        if (!trainingSnapshot.empty) {
+        const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime <= now);
+        if (completedTrainingJobs.length > 0) {
             const unitUpdates: { [key: string]: any } = {};
-            trainingSnapshot.forEach(doc => {
+            completedTrainingJobs.forEach(doc => {
                 const job = doc.data();
                 unitUpdates[`units.${job.unitId}`] = increment(job.amount);
                 batch.delete(doc.ref);
@@ -163,10 +165,11 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
 
     // --- Attack Queue Logic ---
     try {
-        const attackQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid), where('arrivalTime', '<=', now));
+        const attackQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid));
         const attackSnapshot = await getDocs(attackQuery);
+        const completedAttacks = attackSnapshot.docs.filter(doc => doc.data().arrivalTime <= now);
 
-        for (const attackDoc of attackSnapshot.docs) {
+        for (const attackDoc of completedAttacks) {
             const attackData = attackDoc.data();
             
             const defenderRef = doc(db, 'users', attackData.defenderId);
@@ -197,8 +200,8 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             const defenderTitleBonus = getBonus(defenderProfile, 'defense');
 
             const buildingEffectsSnap = await getDoc(doc(db, 'game-settings', 'building-effects'));
-            const fortDefenseBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data().fort?.defenseBonus ?? 0 : 0;
-            const mobilityAttackBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data().mobility?.attackBonus ?? 0 : 0;
+            const fortDefenseBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data()?.fort?.defenseBonus ?? 0 : 0;
+            const mobilityAttackBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data()?.mobility?.attackBonus ?? 0 : 0;
 
             const attackerMobilityBonus = (attackerProfile.buildings?.mobility ?? 0) * mobilityAttackBonusPerBuilding;
             const defenderFortBonus = (defenderProfile.buildings?.fort ?? 0) * fortDefenseBonusPerBuilding;
