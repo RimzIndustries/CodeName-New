@@ -127,19 +127,17 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
         
         if (!constructionSnapshot.empty) {
             const buildingUpdates: { [key: string]: any } = {};
             constructionSnapshot.forEach(doc => {
-                if (doc.data().completionTime <= now) {
-                    const job = doc.data();
-                    buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
-                    batch.delete(doc.ref);
-                }
+                const job = doc.data();
+                buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
+                batch.delete(doc.ref);
             });
              if (Object.keys(buildingUpdates).length > 0) {
                 batch.set(userDocRef, buildingUpdates, { merge: true });
@@ -150,11 +148,9 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         if (!trainingSnapshot.empty) {
             const unitUpdates: { [key: string]: any } = {};
             trainingSnapshot.forEach(doc => {
-                 if (doc.data().completionTime <= now) {
-                    const job = doc.data();
-                    unitUpdates[`units.${job.unitId}`] = increment(job.amount);
-                    batch.delete(doc.ref);
-                }
+                const job = doc.data();
+                unitUpdates[`units.${job.unitId}`] = increment(job.amount);
+                batch.delete(doc.ref);
             });
             if (Object.keys(unitUpdates).length > 0) {
                 batch.set(userDocRef, unitUpdates, { merge: true });
@@ -167,15 +163,11 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
 
     // --- Attack Queue Logic ---
     try {
-        const attackQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid));
+        const attackQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid), where('arrivalTime', '<=', now));
         const attackSnapshot = await getDocs(attackQuery);
 
         for (const attackDoc of attackSnapshot.docs) {
             const attackData = attackDoc.data();
-            // Filter client-side
-            if (attackData.arrivalTime > now) {
-                continue;
-            }
             
             const defenderRef = doc(db, 'users', attackData.defenderId);
             const defenderSnap = await getDoc(defenderRef);
