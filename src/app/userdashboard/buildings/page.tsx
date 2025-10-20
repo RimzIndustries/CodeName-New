@@ -447,5 +447,3 @@ export default function BuildingsPage() {
     </Card>
   );
 }
-
-    

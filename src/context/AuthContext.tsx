@@ -128,31 +128,39 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
         
         if (!constructionSnapshot.empty) {
             const buildingUpdates: { [key: string]: any } = {};
-            constructionSnapshot.forEach(doc => {
+            constructionSnapshot.docs.forEach(doc => {
                 const job = doc.data();
-                buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
-                batch.delete(doc.ref);
+                if (job.completionTime.toDate() <= now.toDate()) {
+                    buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
+                    batch.delete(doc.ref);
+                    hasUpdate = true;
+                }
             });
-            batch.update(userDocRef, buildingUpdates);
-            hasUpdate = true;
+            if (Object.keys(buildingUpdates).length > 0) {
+              batch.update(userDocRef, buildingUpdates);
+            }
         }
 
         if (!trainingSnapshot.empty) {
             const unitUpdates: { [key: string]: any } = {};
-            trainingSnapshot.forEach(doc => {
-                const job = doc.data();
-                unitUpdates[`units.${job.unitId}`] = increment(job.amount);
-                batch.delete(doc.ref);
+            trainingSnapshot.docs.forEach(doc => {
+              const job = doc.data();
+               if (job.completionTime.toDate() <= now.toDate()) {
+                  unitUpdates[`units.${job.unitId}`] = increment(job.amount);
+                  batch.delete(doc.ref);
+                  hasUpdate = true;
+               }
             });
-            batch.update(userDocRef, unitUpdates);
-            hasUpdate = true;
+            if(Object.keys(unitUpdates).length > 0) {
+              batch.update(userDocRef, unitUpdates);
+            }
         }
     } catch (error) {
         console.error("Error processing queues:", error);
@@ -185,8 +193,9 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             // --- SPY MISSION ---
             if (missionData.type === 'spy') {
                 const totalSpies = missionData.units.spy || 0;
-                const defenderTotalTroops = Object.values(defenderProfile.units).reduce((a,b) => a+b, 0);
-                const successChance = Math.max(0.1, (totalSpies * 2) / (defenderTotalTroops || 1));
+                const defenderTotalDefenseTroops = defenderProfile.units.defense || 0;
+                // Success chance decreases as defender has more defense troops.
+                const successChance = Math.max(0.05, (totalSpies * 2) / (defenderTotalDefenseTroops || 1));
                 const isSuccess = Math.random() < successChance;
                 
                 const reportRef = doc(collection(db, 'reports'));
