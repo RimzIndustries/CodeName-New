@@ -355,6 +355,20 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     } catch (error) {
         console.error("Error processing mission queue:", error);
     }
+
+    // --- Expired Wars Logic ---
+    try {
+        const expiredWarsQuery = query(collection(db, "wars"), where("expiresAt", "<=", now));
+        const expiredWarsSnapshot = await getDocs(expiredWarsQuery);
+        if (!expiredWarsSnapshot.empty) {
+            expiredWarsSnapshot.forEach(warDoc => {
+                batch.delete(warDoc.ref);
+            });
+            hasUpdate = true;
+        }
+    } catch (error) {
+        console.error("Error processing expired wars:", error);
+    }
     
     batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
     hasUpdate = true;
@@ -488,3 +502,5 @@ export const useAuth = () => {
   }
   return context;
 };
+
+    

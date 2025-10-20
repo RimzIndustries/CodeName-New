@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, getDoc, addDoc, serverTimestamp, getDocs, deleteDoc, or } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, getDoc, addDoc, serverTimestamp, getDocs, deleteDoc, or, Timestamp } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
@@ -15,9 +15,10 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import Image from 'next/image';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Crown, Swords, Wrench } from 'lucide-react';
+import { Crown, Swords, Wrench, Hourglass } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { differenceInSeconds } from 'date-fns';
 
 
 interface AllianceMember {
@@ -46,6 +47,33 @@ interface GameTitle {
   id: string;
   name: string;
   prideRequired: number;
+}
+
+function WarCountdown({ expiryTimestamp }: { expiryTimestamp: Timestamp }) {
+  const [timeLeft, setTimeLeft] = useState('');
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = new Date();
+      const expiry = expiryTimestamp.toDate();
+      const secondsRemaining = differenceInSeconds(expiry, now);
+
+      if (secondsRemaining <= 0) {
+        setTimeLeft('Selesai');
+        clearInterval(timer);
+        // Data will be cleared by backend process, UI might linger for a bit.
+      } else {
+        const days = Math.floor(secondsRemaining / 86400);
+        const hours = Math.floor((secondsRemaining % 86400) / 3600);
+        const minutes = Math.floor((secondsRemaining % 3600) / 60);
+        setTimeLeft(`${days}h ${String(hours).padStart(2, '0')}j ${String(minutes).padStart(2, '0')}m`);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [expiryTimestamp]);
+
+  return <span className="font-mono text-destructive">{timeLeft}</span>;
 }
 
 export default function AlliancePage() {
@@ -374,11 +402,15 @@ export default function AlliancePage() {
                 setIsDeclaringWar(false);
                 return;
             }
+            
+            const warDurationMillis = 72 * 60 * 60 * 1000;
+            const expiresAt = Timestamp.fromMillis(Date.now() + warDurationMillis);
 
             await addDoc(collection(db, 'wars'), {
                 participants: [userProfile.allianceId, warTargetId],
                 declaredBy: userProfile.allianceId,
-                declaredAt: serverTimestamp()
+                declaredAt: serverTimestamp(),
+                expiresAt: expiresAt,
             });
 
             const targetAlliance = otherAlliances.find(a => a.id === warTargetId);
@@ -556,14 +588,19 @@ export default function AlliancePage() {
                      <Alert variant="destructive">
                         <Swords className="h-4 w-4" />
                         <AlertTitle>Sedang Berperang!</AlertTitle>
-                        <AlertDescription>
-                            Aliansi Anda saat ini sedang berperang dengan <strong>{enemyAlliance?.name || 'aliansi musuh'}</strong>.
-                            Anda dapat menyerang anggota mereka melalui halaman Komando.
+                        <AlertDescription className="space-y-1">
+                            <p>Aliansi Anda saat ini sedang berperang dengan <strong>{enemyAlliance?.name || 'aliansi musuh'}</strong>.</p>
+                            {activeWar.expiresAt && (
+                                <p className="flex items-center gap-2">
+                                  <Hourglass className="h-4 w-4"/>
+                                  <span>Perang akan berakhir dalam: <WarCountdown expiryTimestamp={activeWar.expiresAt} /></span>
+                                </p>
+                            )}
                         </AlertDescription>
                     </Alert>
                 ) : isLeader ? (
                      <div className="space-y-4">
-                        <p className="text-sm text-muted-foreground">Sebagai pemimpin, Anda dapat mendeklarasikan perang terhadap aliansi lain.</p>
+                        <p className="text-sm text-muted-foreground">Sebagai pemimpin, Anda dapat mendeklarasikan perang terhadap aliansi lain. Perang akan berlangsung selama 72 jam.</p>
                         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                             <Select onValueChange={setWarTargetId} value={warTargetId}>
                                 <SelectTrigger className="w-full sm:w-[250px]">
@@ -583,7 +620,7 @@ export default function AlliancePage() {
                                     <AlertDialogHeader>
                                         <AlertDialogTitle>Deklarasikan Perang?</AlertDialogTitle>
                                         <AlertDialogDescription>
-                                            Apakah Anda yakin ingin mendeklarasikan perang terhadap aliansi yang dipilih? Tindakan ini akan memulai permusuhan terbuka.
+                                            Apakah Anda yakin ingin mendeklarasikan perang terhadap aliansi yang dipilih? Tindakan ini akan memulai permusuhan terbuka selama 72 jam.
                                         </AlertDialogDescription>
                                     </AlertDialogHeader>
                                     <AlertDialogFooter>
@@ -610,5 +647,7 @@ export default function AlliancePage() {
     </div>
   );
 }
+
+    
 
     
