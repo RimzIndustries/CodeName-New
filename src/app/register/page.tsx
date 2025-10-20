@@ -122,7 +122,7 @@ export default function RegisterPage() {
       }
       // Admins will have null allianceId, 0,0 coordinates, and 0 for all resources.
 
-      // Create user profile in Firestore with initial resources
+      // Create user profile in Firestore with all prepared data
       await setDoc(doc(db, 'users', user.uid), {
         uid: user.uid,
         email: user.email,
@@ -267,3 +267,5 @@ export default function RegisterPage() {
     </div>
   );
 }
+
+    
