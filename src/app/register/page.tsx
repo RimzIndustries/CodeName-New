@@ -81,25 +81,44 @@ export default function RegisterPage() {
         initialPride = 500;
         initialUnemployed = 10;
 
-        // Assign to Alliance and determine coordinates for users
+        // --- New Alliance Assignment Logic ---
         const alliancesCollectionRef = collection(db, 'alliances');
-        const allianceSnapshot = await getDocs(alliancesCollectionRef);
+        const usersCollectionRef = collection(db, 'users');
+
+        const [allianceSnapshot, usersSnapshot] = await Promise.all([
+          getDocs(alliancesCollectionRef),
+          getDocs(usersCollectionRef),
+        ]);
+
+        const memberCounts: Record<string, number> = {};
+        usersSnapshot.forEach(userDoc => {
+          const allianceId = userDoc.data().allianceId;
+          if (allianceId) {
+            memberCounts[allianceId] = (memberCounts[allianceId] || 0) + 1;
+          }
+        });
+        
         const allAlliances = allianceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
 
-        if (allAlliances.length > 0) {
-            const assignedAlliance = allAlliances[Math.floor(Math.random() * allAlliances.length)];
+        const eligibleAlliances = allAlliances.filter(alliance => (memberCounts[alliance.id] || 0) < 10);
+        
+        if (eligibleAlliances.length > 0) {
+            const assignedAlliance = eligibleAlliances[Math.floor(Math.random() * eligibleAlliances.length)];
             assignedAllianceId = assignedAlliance.id;
             userCoordinates = {
                 x: assignedAlliance.coordinates?.x ?? 0,
                 y: assignedAlliance.coordinates?.y ?? 0,
             };
         } else {
-            console.warn("No alliances for user. Assigning random coordinates.");
+            // Fallback if no eligible alliances are found
+            console.warn("No alliances with < 10 members. Assigning random coordinates.");
+            assignedAllianceId = null;
             userCoordinates = {
                 x: Math.floor(Math.random() * 201) - 100,
                 y: Math.floor(Math.random() * 201) - 100,
             };
         }
+
       }
       // Admins will have null allianceId, 0,0 coordinates, and 0 for all resources.
 
