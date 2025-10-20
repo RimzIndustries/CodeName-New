@@ -161,7 +161,7 @@ export default function AdminDashboardPage() {
   const [isSavingTime, setIsSavingTime] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isResettingAlliances, setIsResettingAlliances] = useState(false);
-  const [isResettingPlayers, setIsResettingPlayers] = useState(false);
+  const [isDeletingPlayers, setIsDeletingPlayers] = useState(false);
   const [isSavingEffects, setIsSavingEffects] = useState(false);
   const [isSavingMechanics, setIsSavingMechanics] = useState(false);
 
@@ -746,56 +746,43 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const handleFullResetPlayers = async () => {
-    setIsResettingPlayers(true);
+  const handleDeleteAllPlayers = async () => {
+    setIsDeletingPlayers(true);
     try {
-        const settingsDocRef = doc(db, 'game-settings', 'initial-resources');
-        const settingsDocSnap = await getDoc(settingsDocRef);
-        const initialResources = settingsDocSnap.exists() 
-            ? settingsDocSnap.data() 
-            : { money: 1000, food: 500, land: 100 };
+      const usersQuery = query(collection(db, 'users'), where('role', '==', 'user'));
+      const usersSnapshot = await getDocs(usersQuery);
 
-        const usersQuery = query(collection(db, 'users'), where('role', '==', 'user'));
-        const usersSnapshot = await getDocs(usersQuery);
+      if (usersSnapshot.empty) {
+        toast({ title: "Tidak ada pemain untuk dihapus", description: "Tidak ada pengguna non-admin yang ditemukan." });
+        setIsDeletingPlayers(false);
+        return;
+      }
+      
+      const batch = writeBatch(db);
+      usersSnapshot.forEach(userDoc => {
+          batch.delete(userDoc.ref);
+      });
+      await batch.commit();
+      
+      // TODO: Call a Cloud Function to delete users from Auth, as it's a privileged operation.
+      // For now, we just inform the admin.
+      toast({
+        title: "Penghapusan Berhasil",
+        description: `Data Firestore untuk ${usersSnapshot.size} pemain telah dihapus. Hapus akun Auth mereka secara manual.`,
+      });
+      setUsers(users.filter(u => u.role === 'admin'));
 
-        if (usersSnapshot.empty) {
-            toast({ title: "Tidak ada pemain untuk direset", description: "Tidak ada pengguna non-admin yang ditemukan." });
-            setIsResettingPlayers(false);
-            return;
-        }
-
-        const batch = writeBatch(db);
-        usersSnapshot.forEach(userDoc => {
-            batch.update(userDoc.ref, {
-                money: initialResources.money ?? 1000,
-                food: initialResources.food ?? 500,
-                land: initialResources.land ?? 100,
-                pride: 500,
-                unemployed: 10,
-                buildings: { residence: 0, farm: 0, fort: 0, university: 0, barracks: 0, mobility: 0, tambang: 0 },
-                units: { attack: 0, defense: 0, elite: 0, raider: 0, spy: 0 },
-                lastResourceUpdate: serverTimestamp(),
-                allianceId: null,
-            });
-        });
-        
-        await batch.commit();
-
-        toast({
-            title: "Reset Pemain Berhasil",
-            description: `Data game untuk ${usersSnapshot.size} pemain telah berhasil direset. Akun mereka tidak dihapus.`,
-        });
     } catch (error) {
-        console.error("Error resetting players:", error);
-        toast({
-            title: "Gagal Mereset Pemain",
-            description: "Terjadi kesalahan saat mencoba mereset data pemain.",
-            variant: "destructive",
-        });
+      console.error("Error deleting players:", error);
+      toast({
+        title: "Gagal Menghapus Pemain",
+        description: "Terjadi kesalahan saat mencoba menghapus data pemain dari Firestore.",
+        variant: "destructive",
+      });
     } finally {
-        setIsResettingPlayers(false);
+      setIsDeletingPlayers(false);
     }
-};
+  };
 
   const handleAddTitle = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2119,24 +2106,24 @@ export default function AdminDashboardPage() {
                       </AlertDialog>
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                           <Button variant="destructive" disabled={isResettingPlayers}>
-                            {isResettingPlayers ? 'Mereset Pemain...' : 'Reset Semua Pemain'}
+                           <Button variant="destructive" disabled={isDeletingPlayers}>
+                            {isDeletingPlayers ? 'Menghapus Pemain...' : 'Hapus Semua Pemain'}
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Reset Semua Data Pemain?</AlertDialogTitle>
+                            <AlertDialogTitle>Hapus Semua Akun Pemain?</AlertDialogTitle>
                             <AlertDialogDescription>
-                               Tindakan ini akan mengatur ulang semua data game (sumber daya, pasukan, bangunan, keanggotaan aliansi) untuk semua pemain non-admin ke status awal. Ini TIDAK akan menghapus akun otentikasi mereka.
+                               Tindakan ini akan menghapus semua data pemain non-admin dari database DAN menghapus akun autentikasi mereka secara permanen. Pemain yang dihapus harus mendaftar ulang. Tindakan ini tidak dapat diurungkan.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Batal</AlertDialogCancel>
                             <AlertDialogAction
-                              onClick={handleFullResetPlayers}
+                              onClick={handleDeleteAllPlayers}
                               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             >
-                              Ya, Reset Data Pemain
+                              Ya, Hapus Semua Pemain
                             </AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>
@@ -2297,3 +2284,5 @@ export default function AdminDashboardPage() {
     </TooltipProvider>
   );
 }
+
+    
