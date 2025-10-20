@@ -87,10 +87,9 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 if (bonusesDocSnap.exists() && buildingEffectsSnap.exists()) {
                     const bonusData = bonusesDocSnap.data();
                     const effectsData = buildingEffectsSnap.data();
-                    const updates: DocumentData = {};
-
-                    const hourlyMoneyBonus = bonusData.money ?? 100;
-                    const hourlyFoodBonus = bonusData.food ?? 10;
+                    
+                    const hourlyMoneyBonus = bonusData.money ?? 0;
+                    const hourlyFoodBonus = bonusData.food ?? 0;
                     
                     const moneyFromTambang = (profile.buildings?.tambang ?? 0) * (effectsData.tambang?.money ?? 0);
                     const foodFromFarm = (profile.buildings?.farm ?? 0) * (effectsData.farm?.food ?? 0);
@@ -110,6 +109,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     const totalFoodBonus = (hourlyFoodBonus + foodFromFarm) * diffInHours;
                     const totalUnemployedBonus = unemployedFromBuildings * diffInHours;
                     
+                    const updates: DocumentData = {};
                     if(totalMoneyBonus > 0) updates.money = increment(totalMoneyBonus);
                     if(totalFoodBonus > 0) updates.food = increment(totalFoodBonus);
                     if(totalUnemployedBonus > 0) updates.unemployed = increment(totalUnemployedBonus);
@@ -140,10 +140,8 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                 batch.delete(doc.ref);
             });
-            if (Object.keys(buildingUpdates).length > 0) {
-                batch.set(userDocRef, buildingUpdates, { merge: true });
-                hasUpdate = true;
-            }
+            batch.set(userDocRef, buildingUpdates, { merge: true });
+            hasUpdate = true;
         }
 
         const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime <= now);
@@ -154,10 +152,8 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 unitUpdates[`units.${job.unitId}`] = increment(job.amount);
                 batch.delete(doc.ref);
             });
-            if (Object.keys(unitUpdates).length > 0) {
-                batch.set(userDocRef, unitUpdates, { merge: true });
-                hasUpdate = true;
-            }
+            batch.set(userDocRef, unitUpdates, { merge: true });
+            hasUpdate = true;
         }
     } catch (error) {
         console.error("Error processing queues:", error);
