@@ -9,7 +9,7 @@ import { auth, db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useEffect, useState } from 'react';
-import { Crown, Trash2, Pencil, Ban, Lightbulb, Swords } from 'lucide-react';
+import { Crown, Trash2, Pencil, Ban, Lightbulb, Swords, Eye } from 'lucide-react';
 import { collection, onSnapshot, doc, deleteDoc, getDoc, setDoc, getDocs, writeBatch, addDoc, updateDoc, query, where, serverTimestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -570,7 +570,7 @@ export default function AdminDashboardPage() {
     setIsSavingEffects(true);
     const effectsDocRef = doc(db, 'game-settings', 'building-effects');
     try {
-        await setDoc(effectsDocRef, buildingEffects);
+        await setDoc(effectsDocRef, buildingEffects, { merge: true });
         toast({
             title: "Efek Bangunan Diperbarui",
             description: "Logika permainan untuk efek bangunan telah disimpan.",
@@ -758,17 +758,18 @@ export default function AdminDashboardPage() {
         return;
       }
       
+      // Note: Deleting auth users is a privileged backend operation.
+      // This client-side code will only delete Firestore data.
+      // A Cloud Function would be needed to delete the actual auth accounts.
       const batch = writeBatch(db);
       usersSnapshot.forEach(userDoc => {
           batch.delete(userDoc.ref);
       });
       await batch.commit();
       
-      // TODO: Call a Cloud Function to delete users from Auth, as it's a privileged operation.
-      // For now, we just inform the admin.
       toast({
         title: "Penghapusan Berhasil",
-        description: `Data Firestore untuk ${usersSnapshot.size} pemain telah dihapus. Hapus akun Auth mereka secara manual.`,
+        description: `Data Firestore untuk ${usersSnapshot.size} pemain telah dihapus. Hapus akun Auth mereka secara manual melalui Firebase Console atau dengan fungsi backend.`,
       });
       setUsers(users.filter(u => u.role === 'admin'));
 

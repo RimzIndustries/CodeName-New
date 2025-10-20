@@ -128,15 +128,14 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
         
-        const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now.toDate());
-        if (completedConstructionJobs.length > 0) {
+        if (!constructionSnapshot.empty) {
             const buildingUpdates: { [key: string]: any } = {};
-            completedConstructionJobs.forEach(doc => {
+            constructionSnapshot.forEach(doc => {
                 const job = doc.data();
                 buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                 batch.delete(doc.ref);
@@ -145,10 +144,9 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             hasUpdate = true;
         }
 
-        const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now.toDate());
-        if (completedTrainingJobs.length > 0) {
+        if (!trainingSnapshot.empty) {
             const unitUpdates: { [key: string]: any } = {};
-            completedTrainingJobs.forEach(doc => {
+            trainingSnapshot.forEach(doc => {
                 const job = doc.data();
                 unitUpdates[`units.${job.unitId}`] = increment(job.amount);
                 batch.delete(doc.ref);
