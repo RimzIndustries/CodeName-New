@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { useEffect, useState, useMemo } from 'react';
-import { doc, getDoc, updateDoc, increment, collection, writeBatch, Timestamp, addDoc, query, where, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, increment, collection, writeBatch, Timestamp, addDoc, query, where, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
@@ -187,6 +187,7 @@ export default function BuildingsPage() {
 
     let totalCost = 0;
     let totalBuildingsOrdered = 0;
+    let orderSummary = '';
 
     for (const buildingId in order) {
         const amount = order[buildingId];
@@ -205,6 +206,7 @@ export default function BuildingsPage() {
             }
             totalCost += (amount * costPerUnit);
             totalBuildingsOrdered += amount;
+            orderSummary += `${amount.toLocaleString()} ${buildingNameMap[buildingId] || buildingId}, `;
         }
     }
 
@@ -249,6 +251,16 @@ export default function BuildingsPage() {
                 });
             }
         }
+
+        // Add to activity log
+        const logRef = doc(collection(db, "activityLog"));
+        batch.set(logRef, {
+            userId: user.uid,
+            prideName: userProfile.prideName,
+            type: "build",
+            message: `Memulai konstruksi: ${orderSummary.slice(0, -2)}.`,
+            timestamp: serverTimestamp(),
+        });
 
         await batch.commit();
         toast({ title: "Ditambahkan ke Antrian Konstruksi", description: "Bangunan Anda sedang dibangun dan akan selesai sesuai waktu yang ditentukan." });
@@ -435,3 +447,5 @@ export default function BuildingsPage() {
     </Card>
   );
 }
+
+    

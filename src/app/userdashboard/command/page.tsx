@@ -298,6 +298,16 @@ export default function CommandPage() {
                 type: type
             });
             
+            // Add to activity log
+            const logRef = doc(collection(db, "activityLog"));
+            batch.set(logRef, {
+                userId: user.uid,
+                prideName: userProfile.prideName,
+                type: type === 'attack' ? "attack" : "spy",
+                message: `Melancarkan misi ${type === 'attack' ? 'serangan' : 'spionase'} ke ${target.name}.`,
+                timestamp: serverTimestamp(),
+            });
+
             await batch.commit();
             
             const missionTypeName = type === 'attack' ? 'Serangan' : 'Spionase';
@@ -564,3 +574,5 @@ export default function CommandPage() {
         </div>
     );
 }
+
+    

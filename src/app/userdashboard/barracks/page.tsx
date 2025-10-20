@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { useEffect, useState, useMemo } from 'react';
-import { doc, getDoc, updateDoc, increment, collection, writeBatch, Timestamp, addDoc, query, where, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, increment, collection, writeBatch, Timestamp, addDoc, query, where, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
@@ -179,6 +179,7 @@ export default function BarracksPage() {
     let totalCost = 0;
     let totalUnemployedNeeded = 0;
     let orderCount = 0;
+    let orderSummary = '';
 
     for (const unitId in trainOrder) {
         const amount = trainOrder[unitId];
@@ -194,6 +195,7 @@ export default function BarracksPage() {
             totalCost += amount * costPerUnit;
             totalUnemployedNeeded += amount;
             orderCount++;
+            orderSummary += `${amount.toLocaleString()} ${unitNameMap[unitId] || unitId}, `;
         }
     }
 
@@ -253,6 +255,16 @@ export default function BarracksPage() {
                 });
             }
         }
+        
+        // Add to activity log
+        const logRef = doc(collection(db, "activityLog"));
+        batch.set(logRef, {
+            userId: user.uid,
+            prideName: userProfile.prideName,
+            type: "train",
+            message: `Memulai pelatihan pasukan: ${orderSummary.slice(0, -2)}.`,
+            timestamp: serverTimestamp(),
+        });
         
         await batch.commit();
         
@@ -436,3 +448,5 @@ export default function BarracksPage() {
     </Card>
   );
 }
+
+    

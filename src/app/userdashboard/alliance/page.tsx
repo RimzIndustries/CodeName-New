@@ -319,6 +319,16 @@ export default function AlliancePage() {
             });
             const votedMember = members.find(m => m.id === selectedCandidate);
             toast({ title: "Suara berhasil diberikan!", description: `Anda telah memilih ${getFullMemberNameString(votedMember!)}.` });
+
+            // Add to activity log
+            await addDoc(collection(db, "activityLog"), {
+              userId: user.uid,
+              prideName: userProfile.prideName,
+              type: "vote",
+              message: `Memberikan suara untuk ${votedMember?.prideName || 'kandidat'} dalam pemilihan aliansi.`,
+              timestamp: serverTimestamp(),
+            });
+
         } catch (error) {
             console.error("Error casting vote:", error);
             toast({ title: "Gagal memberikan suara", description: "Terjadi kesalahan.", variant: "destructive" });
@@ -647,7 +657,5 @@ export default function AlliancePage() {
     </div>
   );
 }
-
-    
 
     
