@@ -58,8 +58,7 @@ export default function ReportsPage() {
         setIsLoading(true);
         const reportsQuery = query(
             collection(db, 'reports'), 
-            where('involvedUsers', 'array-contains', user.uid),
-            orderBy('timestamp', 'desc')
+            where('involvedUsers', 'array-contains', user.uid)
         );
 
         const unsubscribe = onSnapshot(reportsQuery, (snapshot) => {
@@ -89,6 +88,14 @@ export default function ReportsPage() {
 
                 reportList.push(report as Report);
             });
+            
+            // Sort reports on the client-side
+            reportList.sort((a, b) => {
+                const timeA = a.timestamp?.toDate() ?? 0;
+                const timeB = b.timestamp?.toDate() ?? 0;
+                return timeB - timeA;
+            });
+            
             setReports(reportList);
             setIsLoading(false);
         }, (error) => {
@@ -240,3 +247,5 @@ export default function ReportsPage() {
     </div>
   );
 }
+
+    
