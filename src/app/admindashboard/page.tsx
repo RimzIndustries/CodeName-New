@@ -47,6 +47,7 @@ interface UnitCosts {
     defense: number;
     elite: number;
     raider: number;
+    spy: number;
 }
 
 interface BuildingCosts {
@@ -136,7 +137,7 @@ export default function AdminDashboardPage() {
   const [initialMoney, setInitialMoney] = useState(1000);
   const [initialFood, setInitialFood] = useState(500);
   const [initialLand, setInitialLand] = useState(100);
-  const [unitCosts, setUnitCosts] = useState<UnitCosts>({ attack: 350, defense: 350, elite: 950, raider: 500 });
+  const [unitCosts, setUnitCosts] = useState<UnitCosts>({ attack: 350, defense: 350, elite: 950, raider: 500, spy: 700 });
   const [buildingCosts, setBuildingCosts] = useState<BuildingCosts>({ residence: 1000, farm: 1200, fort: 2500, university: 5000, barracks: 1500, mobility: 1000, tambang: 2000 });
   const [constructionTime, setConstructionTime] = useState(5); // in hours
   const [trainingTime, setTrainingTime] = useState(2); // in hours
@@ -652,7 +653,7 @@ export default function AdminDashboardPage() {
                 pride: 500,
                 unemployed: 10,
                 buildings: { residence: 0, farm: 0, fort: 0, university: 0, barracks: 0, mobility: 0, tambang: 0 },
-                units: { attack: 0, defense: 0, elite: 0, raider: 0 },
+                units: { attack: 0, defense: 0, elite: 0, raider: 0, spy: 0 },
                 lastResourceUpdate: serverTimestamp(),
             });
         });
@@ -772,7 +773,7 @@ export default function AdminDashboardPage() {
                 pride: 500,
                 unemployed: 10,
                 buildings: { residence: 0, farm: 0, fort: 0, university: 0, barracks: 0, mobility: 0, tambang: 0 },
-                units: { attack: 0, defense: 0, elite: 0, raider: 0 },
+                units: { attack: 0, defense: 0, elite: 0, raider: 0, spy: 0 },
                 lastResourceUpdate: serverTimestamp(),
                 allianceId: null,
             });
@@ -1345,6 +1346,10 @@ export default function AdminDashboardPage() {
                                             <div className="grid gap-2">
                                                 <Label htmlFor="cost-raider">Perampok</Label>
                                                 <Input id="cost-raider" type="number" value={unitCosts.raider} onChange={e => setUnitCosts(prev => ({...prev, raider: Number(e.target.value)}))} min="0" />
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="cost-spy">Mata-mata</Label>
+                                                <Input id="cost-spy" type="number" value={unitCosts.spy} onChange={e => setUnitCosts(prev => ({...prev, spy: Number(e.target.value)}))} min="0" />
                                             </div>
                                         </div>
                                     </div>

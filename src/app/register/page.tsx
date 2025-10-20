@@ -118,7 +118,7 @@ export default function RegisterPage() {
         pride: initialPride,
         unemployed: initialUnemployed,
         buildings: { residence: 0, farm: 0, fort: 0, university: 0, barracks: 0, mobility: 0, tambang: 0 },
-        units: { attack: 0, defense: 0, elite: 0, raider: 0 },
+        units: { attack: 0, defense: 0, elite: 0, raider: 0, spy: 0 },
         lastResourceUpdate: Timestamp.now(),
         allianceId: assignedAllianceId,
         coordinates: userCoordinates,

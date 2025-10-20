@@ -20,12 +20,14 @@ interface UnitCosts {
     defense: number;
     elite: number;
     raider: number;
+    spy: number;
 }
 interface UnitCounts {
     attack: number;
     defense: number;
     elite: number;
     raider: number;
+    spy: number;
 }
 
 interface TrainingJob {
@@ -36,20 +38,22 @@ interface TrainingJob {
     completionTime: Timestamp;
 }
 
-const defaultUnitCosts: UnitCosts = { attack: 350, defense: 350, elite: 950, raider: 500 };
+const defaultUnitCosts: UnitCosts = { attack: 350, defense: 350, elite: 950, raider: 500, spy: 700 };
 
 const unitDefinitions = [
   { id: 'attack', name: 'Pasukan Serang', stats: '(10/0)' },
   { id: 'defense', name: 'Pasukan Bertahan', stats: '(0/10)' },
   { id: 'elite', name: 'Pasukan Elit', stats: '(13/5)' },
   { id: 'raider', name: 'Perampok', stats: '(0/0)' },
+  { id: 'spy', name: 'Mata-mata', stats: '(Intelligent)' },
 ];
 
 const unitNameMap: { [key: string]: string } = {
   attack: 'Pasukan Serang',
   defense: 'Pasukan Bertahan',
   elite: 'Pasukan Elit',
-  raider: 'Perampok'
+  raider: 'Perampok',
+  spy: 'Mata-mata'
 };
 
 function Countdown({ completionTime }: { completionTime: Timestamp }) {
@@ -141,7 +145,7 @@ export default function BarracksPage() {
   }, [user, toast]);
 
   const ownedUnits = useMemo(() => {
-    return userProfile?.units ?? { attack: 0, defense: 0, elite: 0, raider: 0 };
+    return userProfile?.units ?? { attack: 0, defense: 0, elite: 0, raider: 0, spy: 0 };
   }, [userProfile?.units]);
 
   const handleTrainOrderChange = (unitId: string, value: string) => {

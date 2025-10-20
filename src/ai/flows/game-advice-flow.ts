@@ -18,6 +18,7 @@ const UnitCostsSchema = z.object({
   defense: z.number(),
   elite: z.number(),
   raider: z.number(),
+  spy: z.number(),
 });
 
 const BuildingCostsSchema = z.object({

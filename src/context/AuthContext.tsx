@@ -25,6 +25,7 @@ interface UnitCounts {
   defense: number;
   elite: number;
   raider: number;
+  spy: number;
 }
 
 export interface UserProfile {
@@ -88,12 +89,15 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     const bonusData = bonusesDocSnap.data();
                     const effectsData = buildingEffectsSnap.data();
                     
+                    // Base bonuses
                     const hourlyMoneyBonus = bonusData.money ?? 0;
                     const hourlyFoodBonus = bonusData.food ?? 0;
                     
+                    // Bonuses from buildings
                     const moneyFromTambang = (profile.buildings?.tambang ?? 0) * (effectsData.tambang?.money ?? 0);
                     const foodFromFarm = (profile.buildings?.farm ?? 0) * (effectsData.farm?.food ?? 0);
                     
+                    // Unemployed generation from all buildings
                     let unemployedFromBuildings = 0;
                     if (profile.buildings && effectsData) {
                         for (const buildingKey in profile.buildings) {
@@ -132,7 +136,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
         
-        const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime <= now);
+        const completedConstructionJobs = constructionSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now.toDate());
         if (completedConstructionJobs.length > 0) {
             const buildingUpdates: { [key: string]: any } = {};
             completedConstructionJobs.forEach(doc => {
@@ -144,7 +148,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             hasUpdate = true;
         }
 
-        const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime <= now);
+        const completedTrainingJobs = trainingSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now.toDate());
         if (completedTrainingJobs.length > 0) {
             const unitUpdates: { [key: string]: any } = {};
             completedTrainingJobs.forEach(doc => {
@@ -159,156 +163,197 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         console.error("Error processing queues:", error);
     }
 
-    // --- Attack Queue Logic ---
+    // --- Mission Queue Logic (Attack & Spy) ---
     try {
-        const attackQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid));
-        const attackSnapshot = await getDocs(attackQuery);
-        const completedAttacks = attackSnapshot.docs.filter(doc => doc.data().arrivalTime <= now);
+        const missionQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid));
+        const missionSnapshot = await getDocs(missionQuery);
+        const completedMissions = missionSnapshot.docs.filter(doc => doc.data().arrivalTime.toDate() <= now.toDate());
 
-        for (const attackDoc of completedAttacks) {
-            const attackData = attackDoc.data();
-            
-            const defenderRef = doc(db, 'users', attackData.defenderId);
+        for (const missionDoc of completedMissions) {
+            const missionData = missionDoc.data();
+            const defenderRef = doc(db, 'users', missionData.defenderId);
             const defenderSnap = await getDoc(defenderRef);
 
             if (!defenderSnap.exists()) {
                 const unitReturns: { [key: string]: any } = {};
-                for (const unit in attackData.units) {
-                    unitReturns[`units.${unit}`] = increment(attackData.units[unit]);
+                for (const unit in missionData.units) {
+                    unitReturns[`units.${unit}`] = increment(missionData.units[unit]);
                 }
                 batch.update(userDocRef, unitReturns);
-                batch.delete(attackDoc.ref);
+                batch.delete(missionDoc.ref);
                 continue;
             }
 
             const defenderProfile = defenderSnap.data() as UserProfile;
             const attackerProfile = profile; 
 
-            const titlesSnapshot = await getDocs(collection(db, 'titles'));
-            const titles = titlesSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-
-            const getBonus = (user: UserProfile, type: 'attack' | 'defense' | 'resource') => {
-                const title = [...titles].reverse().find(t => (user.pride ?? 0) >= (t as any).prideRequired);
-                return title ? (title as any)[`${type}Bonus`] ?? 0 : 0;
-            };
-
-            const attackerTitleBonus = getBonus(attackerProfile, 'attack');
-            const defenderTitleBonus = getBonus(defenderProfile, 'defense');
-
-            const buildingEffectsSnap = await getDoc(doc(db, 'game-settings', 'building-effects'));
-            const fortDefenseBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data()?.fort?.defenseBonus ?? 0 : 0;
-            const mobilityAttackBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data()?.mobility?.attackBonus ?? 0 : 0;
-
-            const attackerMobilityBonus = (attackerProfile.buildings?.mobility ?? 0) * mobilityAttackBonusPerBuilding;
-            const defenderFortBonus = (defenderProfile.buildings?.fort ?? 0) * fortDefenseBonusPerBuilding;
-            
-            const totalAttackerBonus = attackerTitleBonus + attackerMobilityBonus;
-            const totalDefenderBonus = defenderTitleBonus + defenderFortBonus;
-
-            const attackerPower = (attackData.units.attack || 0) * 10 * (1 + totalAttackerBonus / 100) + 
-                                  (attackData.units.elite || 0) * 13 * (1 + totalAttackerBonus / 100);
-
-            const defenderPower = (defenderProfile.units.defense || 0) * 10 * (1 + totalDefenderBonus / 100) +
-                                  (defenderProfile.units.elite || 0) * 5 * (1 + totalDefenderBonus / 100);
-
-            const powerRatio = attackerPower / (defenderPower || 1);
-
-            let outcomeForAttacker: 'win' | 'loss';
-            let attackerLossPercent = 0;
-            let defenderLossPercent = 0;
-
-            if (powerRatio > 1.2) {
-                outcomeForAttacker = 'win';
-                attackerLossPercent = 0.1;
-                defenderLossPercent = 0.7;
-            } else if (powerRatio > 1) {
-                outcomeForAttacker = 'win';
-                attackerLossPercent = 0.3;
-                defenderLossPercent = 0.5;
-            } else if (powerRatio > 0.8) { 
-                outcomeForAttacker = 'loss'; 
-                attackerLossPercent = 0.6;
-                defenderLossPercent = 0.6;
-            } else {
-                outcomeForAttacker = 'loss';
-                attackerLossPercent = 0.9;
-                defenderLossPercent = 0.2;
-            }
-            
-            const unitsLostAttacker: Record<string, number> = {};
-            const survivingAttackers: Record<string, number> = {};
-            for (const unit in attackData.units) {
-                const lost = Math.floor(attackData.units[unit] * attackerLossPercent);
-                unitsLostAttacker[unit] = lost;
-                survivingAttackers[unit] = attackData.units[unit] - lost;
-            }
-
-            const unitsLostDefender: Record<string, number> = {};
-            const defenderUpdates: { [key: string]: any } = {};
-            for (const unit in defenderProfile.units) {
-                const u = unit as keyof UnitCounts;
-                const lost = Math.floor((defenderProfile.units[u] ?? 0) * defenderLossPercent);
-                unitsLostDefender[u] = lost;
-                if (lost > 0) {
-                    defenderUpdates[`units.${u}`] = increment(-lost);
-                }
-            }
-            if (Object.keys(defenderUpdates).length > 0) {
-                batch.update(defenderRef, defenderUpdates);
-            }
-            
-            const survivingUpdates: { [key: string]: any } = {};
-            for (const unit in survivingAttackers) {
-                if (survivingAttackers[unit] > 0) {
-                    survivingUpdates[`units.${unit}`] = increment(survivingAttackers[unit]);
-                }
-            }
-            if(Object.keys(survivingUpdates).length > 0) {
-              batch.update(userDocRef, survivingUpdates);
-            }
-
-            const resourcesPlundered = { money: 0, food: 0 };
-            if (outcomeForAttacker === 'win') {
-                const plunderCapacity = (attackData.units.raider || 0) * 100;
-                const moneyPlundered = Math.min(defenderProfile.money * 0.1, plunderCapacity / 2);
-                const foodPlundered = Math.min(defenderProfile.food * 0.1, plunderCapacity / 2);
+            // --- SPY MISSION ---
+            if (missionData.type === 'spy') {
+                const totalSpies = missionData.units.spy || 0;
+                const defenderTotalTroops = Object.values(defenderProfile.units).reduce((a,b) => a+b, 0);
+                const successChance = Math.max(0.1, (totalSpies * 2) / (defenderTotalTroops || 1));
+                const isSuccess = Math.random() < successChance;
                 
-                resourcesPlundered.money = Math.floor(moneyPlundered);
-                resourcesPlundered.food = Math.floor(foodPlundered);
+                const reportRef = doc(collection(db, 'reports'));
+                const reportPayload: any = {
+                    type: 'spy',
+                    involvedUsers: [attackerProfile.uid, defenderProfile.uid],
+                    attackerId: attackerProfile.uid,
+                    defenderId: defenderProfile.uid,
+                    attackerName: attackerProfile.prideName,
+                    defenderName: defenderProfile.prideName,
+                    timestamp: serverTimestamp(),
+                    readBy: { [attackerProfile.uid]: false, [defenderProfile.uid]: false }
+                };
 
-                if (resourcesPlundered.money > 0 || resourcesPlundered.food > 0) {
-                    batch.update(defenderRef, { 
-                        money: increment(-resourcesPlundered.money),
-                        food: increment(-resourcesPlundered.food)
-                    });
-                    batch.update(userDocRef, { 
-                        money: increment(resourcesPlundered.money),
-                        food: increment(resourcesPlundered.food)
-                    });
+                if (isSuccess) {
+                    reportPayload.outcomeForAttacker = 'success';
+                    reportPayload.intel = {
+                        money: defenderProfile.money,
+                        food: defenderProfile.food,
+                        land: defenderProfile.land,
+                        units: defenderProfile.units,
+                        buildings: defenderProfile.buildings
+                    };
+                    // Spies return home
+                    const survivingUpdates: { [key: string]: any } = {};
+                    survivingUpdates['units.spy'] = increment(totalSpies);
+                    batch.update(userDocRef, survivingUpdates);
+                } else {
+                    reportPayload.outcomeForAttacker = 'failure';
+                    // Spies are lost
                 }
+                batch.set(reportRef, reportPayload);
+
+            // --- ATTACK MISSION ---
+            } else if (missionData.type === 'attack') {
+                const titlesSnapshot = await getDocs(collection(db, 'titles'));
+                const titles = titlesSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+
+                const getBonus = (user: UserProfile, type: 'attack' | 'defense' | 'resource') => {
+                    const title = [...titles].reverse().find(t => (user.pride ?? 0) >= (t as any).prideRequired);
+                    return title ? (title as any)[`${type}Bonus`] ?? 0 : 0;
+                };
+
+                const attackerTitleBonus = getBonus(attackerProfile, 'attack');
+                const defenderTitleBonus = getBonus(defenderProfile, 'defense');
+
+                const buildingEffectsSnap = await getDoc(doc(db, 'game-settings', 'building-effects'));
+                const fortDefenseBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data()?.fort?.defenseBonus ?? 0 : 0;
+                const mobilityAttackBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data()?.mobility?.attackBonus ?? 0 : 0;
+
+                const attackerMobilityBonus = (attackerProfile.buildings?.mobility ?? 0) * mobilityAttackBonusPerBuilding;
+                const defenderFortBonus = (defenderProfile.buildings?.fort ?? 0) * fortDefenseBonusPerBuilding;
+                
+                const totalAttackerBonus = attackerTitleBonus + attackerMobilityBonus;
+                const totalDefenderBonus = defenderTitleBonus + defenderFortBonus;
+
+                const attackerPower = (missionData.units.attack || 0) * 10 * (1 + totalAttackerBonus / 100) + 
+                                      (missionData.units.elite || 0) * 13 * (1 + totalAttackerBonus / 100);
+
+                const defenderPower = (defenderProfile.units.defense || 0) * 10 * (1 + totalDefenderBonus / 100) +
+                                      (defenderProfile.units.elite || 0) * 5 * (1 + totalDefenderBonus / 100);
+
+                const powerRatio = attackerPower / (defenderPower || 1);
+
+                let outcomeForAttacker: 'win' | 'loss';
+                let attackerLossPercent = 0;
+                let defenderLossPercent = 0;
+
+                if (powerRatio > 1.2) {
+                    outcomeForAttacker = 'win';
+                    attackerLossPercent = 0.1;
+                    defenderLossPercent = 0.7;
+                } else if (powerRatio > 1) {
+                    outcomeForAttacker = 'win';
+                    attackerLossPercent = 0.3;
+                    defenderLossPercent = 0.5;
+                } else if (powerRatio > 0.8) { 
+                    outcomeForAttacker = 'loss'; 
+                    attackerLossPercent = 0.6;
+                    defenderLossPercent = 0.6;
+                } else {
+                    outcomeForAttacker = 'loss';
+                    attackerLossPercent = 0.9;
+                    defenderLossPercent = 0.2;
+                }
+                
+                const unitsLostAttacker: Record<string, number> = {};
+                const survivingAttackers: Record<string, number> = {};
+                for (const unit in missionData.units) {
+                    const lost = Math.floor(missionData.units[unit] * attackerLossPercent);
+                    unitsLostAttacker[unit] = lost;
+                    survivingAttackers[unit] = missionData.units[unit] - lost;
+                }
+
+                const unitsLostDefender: Record<string, number> = {};
+                const defenderUpdates: { [key: string]: any } = {};
+                for (const unit in defenderProfile.units) {
+                    const u = unit as keyof UnitCounts;
+                    const lost = Math.floor((defenderProfile.units[u] ?? 0) * defenderLossPercent);
+                    unitsLostDefender[u] = lost;
+                    if (lost > 0) {
+                        defenderUpdates[`units.${u}`] = increment(-lost);
+                    }
+                }
+                if (Object.keys(defenderUpdates).length > 0) {
+                    batch.update(defenderRef, defenderUpdates);
+                }
+                
+                const survivingUpdates: { [key: string]: any } = {};
+                for (const unit in survivingAttackers) {
+                    if (survivingAttackers[unit] > 0) {
+                        survivingUpdates[`units.${unit}`] = increment(survivingAttackers[unit]);
+                    }
+                }
+                if(Object.keys(survivingUpdates).length > 0) {
+                  batch.update(userDocRef, survivingUpdates);
+                }
+
+                const resourcesPlundered = { money: 0, food: 0 };
+                if (outcomeForAttacker === 'win') {
+                    const plunderCapacity = (missionData.units.raider || 0) * 100;
+                    const moneyPlundered = Math.min(defenderProfile.money * 0.1, plunderCapacity / 2);
+                    const foodPlundered = Math.min(defenderProfile.food * 0.1, plunderCapacity / 2);
+                    
+                    resourcesPlundered.money = Math.floor(moneyPlundered);
+                    resourcesPlundered.food = Math.floor(foodPlundered);
+
+                    if (resourcesPlundered.money > 0 || resourcesPlundered.food > 0) {
+                        batch.update(defenderRef, { 
+                            money: increment(-resourcesPlundered.money),
+                            food: increment(-resourcesPlundered.food)
+                        });
+                        batch.update(userDocRef, { 
+                            money: increment(resourcesPlundered.money),
+                            food: increment(resourcesPlundered.food)
+                        });
+                    }
+                }
+
+                const reportRef = doc(collection(db, 'reports'));
+                batch.set(reportRef, {
+                    type: 'attack',
+                    involvedUsers: [attackerProfile.uid, defenderProfile.uid],
+                    attackerId: attackerProfile.uid,
+                    defenderId: defenderProfile.uid,
+                    attackerName: attackerProfile.prideName,
+                    defenderName: defenderProfile.prideName,
+                    outcomeForAttacker: outcomeForAttacker,
+                    unitsLostAttacker,
+                    unitsLostDefender,
+                    resourcesPlundered,
+                    timestamp: serverTimestamp(),
+                    readBy: { [attackerProfile.uid]: false, [defenderProfile.uid]: false }
+                });
             }
 
-            const reportRef = doc(collection(db, 'reports'));
-            batch.set(reportRef, {
-                involvedUsers: [attackerProfile.uid, defenderProfile.uid],
-                attackerId: attackerProfile.uid,
-                defenderId: defenderProfile.uid,
-                attackerName: attackerProfile.prideName,
-                defenderName: defenderProfile.prideName,
-                outcomeForAttacker: outcomeForAttacker,
-                unitsLostAttacker,
-                unitsLostDefender,
-                resourcesPlundered,
-                timestamp: serverTimestamp(),
-                readBy: { [attackerProfile.uid]: false, [defenderProfile.uid]: false }
-            });
-
-            batch.delete(attackDoc.ref);
+            batch.delete(missionDoc.ref);
             hasUpdate = true;
         }
 
     } catch (error) {
-        console.error("Error processing attack queue:", error);
+        console.error("Error processing mission queue:", error);
     }
     
     batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });

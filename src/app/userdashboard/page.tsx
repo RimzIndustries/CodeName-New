@@ -247,7 +247,7 @@ export default function UserDashboardPage() {
               <Separator className="bg-border/50"/>
               <div className="flex justify-between items-center"><span className="text-muted-foreground">Pengangguran</span><span>{(userProfile.unemployed ?? 0).toLocaleString()}</span></div>
                <Separator className="bg-border/50"/>
-              <div className="flex justify-between items-center"><span className="text-muted-foreground">Total Pasukan</span><span>{((userProfile.units?.attack ?? 0) + (userProfile.units?.defense ?? 0) + (userProfile.units?.elite ?? 0) + (userProfile.units?.raider ?? 0)).toLocaleString()}</span></div>
+              <div className="flex justify-between items-center"><span className="text-muted-foreground">Total Pasukan</span><span>{((userProfile.units?.attack ?? 0) + (userProfile.units?.defense ?? 0) + (userProfile.units?.elite ?? 0) + (userProfile.units?.raider ?? 0) + (userProfile.units?.spy ?? 0)).toLocaleString()}</span></div>
             </div>
           </CardContent>
         </Card>
@@ -307,7 +307,3 @@ export default function UserDashboardPage() {
     </div>
   );
 }
-
-    
-
-    
