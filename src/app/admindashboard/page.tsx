@@ -264,7 +264,7 @@ export default function AdminDashboardPage() {
             const infoDocRef = doc(db, 'game-settings', 'admin-info');
 
             const [
-              docSnap,
+              settingsDocSnap,
               bonusesDocSnap,
               costsDocSnap,
               timingDocSnap,
@@ -281,8 +281,8 @@ export default function AdminDashboardPage() {
               getDoc(infoDocRef),
             ]);
 
-            if (docSnap.exists()) {
-              const data = docSnap.data();
+            if (settingsDocSnap.exists()) {
+              const data = settingsDocSnap.data();
               setInitialMoney(data.money ?? 1000);
               setInitialFood(data.food ?? 500);
               setInitialLand(data.land ?? 100);
@@ -1244,7 +1244,7 @@ export default function AdminDashboardPage() {
                       <CardHeader>
                         <CardTitle>Bonus Global Per Jam</CardTitle>
                         <CardDescription>
-                          Atur bonus sumber daya yang diterima semua pemain setiap jam.
+                          Atur bonus sumber daya yang diterima semua pemain (yang aktif) setiap jam.
                         </CardDescription>
                       </CardHeader>
                       <CardContent>

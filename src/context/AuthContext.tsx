@@ -140,7 +140,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                 batch.delete(doc.ref);
             });
-            batch.set(userDocRef, buildingUpdates, { merge: true });
+            batch.update(userDocRef, buildingUpdates);
             hasUpdate = true;
         }
 
@@ -152,7 +152,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 unitUpdates[`units.${job.unitId}`] = increment(job.amount);
                 batch.delete(doc.ref);
             });
-            batch.set(userDocRef, unitUpdates, { merge: true });
+            batch.update(userDocRef, unitUpdates);
             hasUpdate = true;
         }
     } catch (error) {
@@ -176,7 +176,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 for (const unit in attackData.units) {
                     unitReturns[`units.${unit}`] = increment(attackData.units[unit]);
                 }
-                batch.set(userDocRef, unitReturns, { merge: true });
+                batch.update(userDocRef, unitReturns);
                 batch.delete(attackDoc.ref);
                 continue;
             }
@@ -254,7 +254,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 }
             }
             if (Object.keys(defenderUpdates).length > 0) {
-                batch.set(defenderRef, defenderUpdates, { merge: true });
+                batch.update(defenderRef, defenderUpdates);
             }
             
             const survivingUpdates: { [key: string]: any } = {};
@@ -264,7 +264,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 }
             }
             if(Object.keys(survivingUpdates).length > 0) {
-              batch.set(userDocRef, survivingUpdates, { merge: true });
+              batch.update(userDocRef, survivingUpdates);
             }
 
             const resourcesPlundered = { money: 0, food: 0 };
@@ -277,14 +277,14 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 resourcesPlundered.food = Math.floor(foodPlundered);
 
                 if (resourcesPlundered.money > 0 || resourcesPlundered.food > 0) {
-                    batch.set(defenderRef, { 
+                    batch.update(defenderRef, { 
                         money: increment(-resourcesPlundered.money),
                         food: increment(-resourcesPlundered.food)
-                    }, { merge: true });
-                    batch.set(userDocRef, { 
+                    });
+                    batch.update(userDocRef, { 
                         money: increment(resourcesPlundered.money),
                         food: increment(resourcesPlundered.food)
-                    }, { merge: true });
+                    });
                 }
             }
 
@@ -311,7 +311,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         console.error("Error processing attack queue:", error);
     }
     
-    batch.set(userDocRef, { lastResourceUpdate: serverTimestamp() }, { merge: true });
+    batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
     hasUpdate = true;
 
     if (hasUpdate) {
