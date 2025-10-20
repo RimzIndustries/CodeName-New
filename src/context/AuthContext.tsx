@@ -89,15 +89,12 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     const bonusData = bonusesDocSnap.data();
                     const effectsData = buildingEffectsSnap.data();
                     
-                    // Base bonuses
                     const hourlyMoneyBonus = bonusData.money ?? 0;
                     const hourlyFoodBonus = bonusData.food ?? 0;
                     
-                    // Bonuses from buildings
                     const moneyFromTambang = (profile.buildings?.tambang ?? 0) * (effectsData.tambang?.money ?? 0);
                     const foodFromFarm = (profile.buildings?.farm ?? 0) * (effectsData.farm?.food ?? 0);
                     
-                    // Unemployed generation from all buildings
                     let unemployedFromBuildings = 0;
                     if (profile.buildings && effectsData) {
                         for (const buildingKey in profile.buildings) {
@@ -119,7 +116,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     if(totalUnemployedBonus > 0) updates.unemployed = increment(totalUnemployedBonus);
                     
                     if (Object.keys(updates).length > 0) {
-                       batch.set(userDocRef, updates, { merge: true });
+                       batch.update(userDocRef, updates);
                        hasUpdate = true;
                     }
                 }
@@ -502,5 +499,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
-    
