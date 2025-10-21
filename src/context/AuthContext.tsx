@@ -128,7 +128,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid));
         const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
@@ -137,11 +137,15 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             const buildingUpdates: { [key: string]: any } = {};
             constructionSnapshot.forEach(doc => {
                 const job = doc.data();
-                buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
-                batch.delete(doc.ref);
+                if (job.completionTime.toDate() <= now.toDate()) {
+                    buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
+                    batch.delete(doc.ref);
+                }
             });
-            batch.update(userDocRef, buildingUpdates);
-            hasUpdate = true;
+            if (Object.keys(buildingUpdates).length > 0) {
+              batch.update(userDocRef, buildingUpdates);
+              hasUpdate = true;
+            }
         }
 
         if (!trainingSnapshot.empty) {
@@ -529,7 +533,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
-    
-
-    
