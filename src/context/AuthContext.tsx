@@ -231,7 +231,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
 
                 } else {
                     reportPayload.outcomeForAttacker = 'failure';
-                    // Spies are lost, but defender is notified
+                    // Spies are lost, but defender is notified via a separate report
                     const defenderReportRef = doc(collection(db, 'reports'));
                      batch.set(defenderReportRef, {
                         type: 'spy-received',
@@ -240,7 +240,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                         defenderId: defenderProfile.uid,
                         attackerName: attackerProfile.prideName,
                         defenderName: defenderProfile.prideName,
-                        outcomeForAttacker: 'failure',
+                        outcomeForAttacker: 'failure', // This is from attacker's perspective, but context is defender receiving
                         timestamp: serverTimestamp(),
                         readBy: { [defenderProfile.uid]: false }
                     });
@@ -579,3 +579,5 @@ export const useAuth = () => {
   }
   return context;
 };
+
+    
