@@ -1,4 +1,3 @@
-
 'use client';
 
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -137,6 +136,7 @@ export default function AdminDashboardPage() {
   const [initialMoney, setInitialMoney] = useState(1000);
   const [initialFood, setInitialFood] = useState(500);
   const [initialLand, setInitialLand] = useState(100);
+  const [initialUnemployed, setInitialUnemployed] = useState(10);
   const [unitCosts, setUnitCosts] = useState<UnitCosts>({ attack: 350, defense: 350, elite: 950, raider: 500, spy: 700 });
   const [buildingCosts, setBuildingCosts] = useState<BuildingCosts>({ residence: 1000, farm: 1200, fort: 2500, university: 5000, barracks: 1500, mobility: 1000, tambang: 2000 });
   const [constructionTime, setConstructionTime] = useState(5); // in hours
@@ -287,6 +287,7 @@ export default function AdminDashboardPage() {
               setInitialMoney(data.money ?? 1000);
               setInitialFood(data.food ?? 500);
               setInitialLand(data.land ?? 100);
+              setInitialUnemployed(data.unemployed ?? 10);
             }
 
             if (bonusesDocSnap.exists()) {
@@ -468,6 +469,7 @@ export default function AdminDashboardPage() {
             money: Number(initialMoney),
             food: Number(initialFood),
             land: Number(initialLand),
+            unemployed: Number(initialUnemployed),
         }, { merge: true });
         toast({
             title: "Pengaturan Diperbarui",
@@ -617,7 +619,7 @@ export default function AdminDashboardPage() {
         const settingsDocSnap = await getDoc(settingsDocRef);
         const initialResources = settingsDocSnap.exists() 
             ? settingsDocSnap.data() 
-            : { money: 1000, food: 500, land: 100 };
+            : { money: 1000, food: 500, land: 100, unemployed: 10 };
 
         const usersQuery = query(collection(db, 'users'), where('role', '==', 'user'));
         const usersSnapshot = await getDocs(usersQuery);
@@ -651,7 +653,7 @@ export default function AdminDashboardPage() {
                 food: initialResources.food ?? 500,
                 land: initialResources.land ?? 100,
                 pride: 500,
-                unemployed: 10,
+                unemployed: initialResources.unemployed ?? 10,
                 buildings: { residence: 0, farm: 0, fort: 0, university: 0, barracks: 0, mobility: 0, tambang: 0 },
                 units: { attack: 0, defense: 0, elite: 0, raider: 0, spy: 0 },
                 lastResourceUpdate: serverTimestamp(),
@@ -1193,35 +1195,47 @@ export default function AdminDashboardPage() {
                           <p className="text-sm text-muted-foreground">Memuat pengaturan...</p>
                         ) : (
                           <form onSubmit={handleUpdateSettings} className="space-y-4">
-                            <div className="grid gap-2">
-                              <Label htmlFor="initial-money">Uang Awal</Label>
-                              <Input
-                                id="initial-money"
-                                type="number"
-                                value={initialMoney}
-                                onChange={(e) => setInitialMoney(Number(e.target.value))}
-                                min="0"
-                              />
-                            </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="initial-food">Makanan Awal</Label>
-                              <Input
-                                id="initial-food"
-                                type="number"
-                                value={initialFood}
-                                onChange={(e) => setInitialFood(Number(e.target.value))}
-                                min="0"
-                              />
-                            </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="initial-land">Tanah Awal</Label>
-                              <Input
-                                id="initial-land"
-                                type="number"
-                                value={initialLand}
-                                onChange={(e) => setInitialLand(Number(e.target.value))}
-                                min="0"
-                              />
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="grid gap-2">
+                                  <Label htmlFor="initial-money">Uang Awal</Label>
+                                  <Input
+                                    id="initial-money"
+                                    type="number"
+                                    value={initialMoney}
+                                    onChange={(e) => setInitialMoney(Number(e.target.value))}
+                                    min="0"
+                                  />
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="initial-food">Makanan Awal</Label>
+                                  <Input
+                                    id="initial-food"
+                                    type="number"
+                                    value={initialFood}
+                                    onChange={(e) => setInitialFood(Number(e.target.value))}
+                                    min="0"
+                                  />
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="initial-land">Tanah Awal</Label>
+                                  <Input
+                                    id="initial-land"
+                                    type="number"
+                                    value={initialLand}
+                                    onChange={(e) => setInitialLand(Number(e.target.value))}
+                                    min="0"
+                                  />
+                                </div>
+                                <div className="grid gap-2">
+                                  <Label htmlFor="initial-unemployed">Pengangguran Awal</Label>
+                                  <Input
+                                    id="initial-unemployed"
+                                    type="number"
+                                    value={initialUnemployed}
+                                    onChange={(e) => setInitialUnemployed(Number(e.target.value))}
+                                    min="0"
+                                  />
+                                </div>
                             </div>
                             <Button type="submit" className="w-full">Simpan Pengaturan</Button>
                           </form>

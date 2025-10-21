@@ -73,13 +73,15 @@ export default function RegisterPage() {
           initialMoney = settingsData.money ?? 1000;
           initialFood = settingsData.food ?? 500;
           initialLand = settingsData.land ?? 100;
+          initialUnemployed = settingsData.unemployed ?? 10;
         } else {
           initialMoney = 1000;
           initialFood = 500;
           initialLand = 100;
+          initialUnemployed = 10;
         }
         initialPride = 500;
-        initialUnemployed = 10;
+        
 
         // --- New Alliance Assignment Logic ---
         const alliancesCollectionRef = collection(db, 'alliances');
