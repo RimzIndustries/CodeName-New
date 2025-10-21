@@ -69,6 +69,26 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     const batch = writeBatch(db);
     let hasUpdate = false;
 
+    // --- Batch Fetch Game Settings ---
+    const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
+    const buildingEffectsRef = doc(db, 'game-settings', 'building-effects');
+    const titlesRef = collection(db, 'titles');
+    
+    const [
+        bonusesDocSnap,
+        buildingEffectsSnap,
+        titlesSnapshot
+    ] = await Promise.all([
+        getDoc(bonusesDocRef),
+        getDoc(buildingEffectsRef),
+        getDocs(titlesRef)
+    ]);
+
+    const bonusData = bonusesDocSnap.exists() ? bonusesDocSnap.data() : {};
+    const effectsData = buildingEffectsSnap.exists() ? buildingEffectsSnap.data() : {};
+    const titles = titlesSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+
+
     // --- Hourly Bonus Logic ---
     if (profile.lastResourceUpdate) {
         const lastUpdate = (profile.lastResourceUpdate as Timestamp).toDate();
@@ -76,52 +96,35 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
 
         if (diffInHours > 0) {
-            try {
-                const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
-                const buildingEffectsRef = doc(db, 'game-settings', 'building-effects');
-                
-                const [bonusesDocSnap, buildingEffectsSnap] = await Promise.all([
-                    getDoc(bonusesDocRef),
-                    getDoc(buildingEffectsRef)
-                ]);
-
-                if (bonusesDocSnap.exists() && buildingEffectsSnap.exists()) {
-                    const bonusData = bonusesDocSnap.data();
-                    const effectsData = buildingEffectsSnap.data();
-                    
-                    const hourlyMoneyBonus = bonusData.money ?? 0;
-                    const hourlyFoodBonus = bonusData.food ?? 0;
-                    
-                    const moneyFromTambang = (profile.buildings?.tambang ?? 0) * (effectsData.tambang?.money ?? 0);
-                    const foodFromFarm = (profile.buildings?.farm ?? 0) * (effectsData.farm?.food ?? 0);
-                    
-                    let unemployedFromBuildings = 0;
-                    if (profile.buildings && effectsData) {
-                        for (const buildingKey in profile.buildings) {
-                            const buildingCount = profile.buildings[buildingKey as keyof BuildingCounts] || 0;
-                            const buildingEffect = effectsData[buildingKey as keyof BuildingCounts];
-                            if (buildingEffect && buildingEffect.unemployed) {
-                                unemployedFromBuildings += buildingCount * buildingEffect.unemployed;
-                            }
-                        }
-                    }
-
-                    const totalMoneyBonus = (hourlyMoneyBonus + moneyFromTambang) * diffInHours;
-                    const totalFoodBonus = (hourlyFoodBonus + foodFromFarm) * diffInHours;
-                    const totalUnemployedBonus = unemployedFromBuildings * diffInHours;
-                    
-                    const updates: DocumentData = {};
-                    if(totalMoneyBonus > 0) updates.money = increment(totalMoneyBonus);
-                    if(totalFoodBonus > 0) updates.food = increment(totalFoodBonus);
-                    if(totalUnemployedBonus > 0) updates.unemployed = increment(totalUnemployedBonus);
-                    
-                    if (Object.keys(updates).length > 0) {
-                       batch.update(userDocRef, updates);
-                       hasUpdate = true;
+            const hourlyMoneyBonus = bonusData.money ?? 0;
+            const hourlyFoodBonus = bonusData.food ?? 0;
+            
+            const moneyFromTambang = (profile.buildings?.tambang ?? 0) * (effectsData.tambang?.money ?? 0);
+            const foodFromFarm = (profile.buildings?.farm ?? 0) * (effectsData.farm?.food ?? 0);
+            
+            let unemployedFromBuildings = 0;
+            if (profile.buildings && effectsData) {
+                for (const buildingKey in profile.buildings) {
+                    const buildingCount = profile.buildings[buildingKey as keyof BuildingCounts] || 0;
+                    const buildingEffect = effectsData[buildingKey as keyof BuildingCounts];
+                    if (buildingEffect && buildingEffect.unemployed) {
+                        unemployedFromBuildings += buildingCount * buildingEffect.unemployed;
                     }
                 }
-            } catch (error) {
-                console.error("Failed to calculate hourly bonus:", error);
+            }
+
+            const totalMoneyBonus = (hourlyMoneyBonus + moneyFromTambang) * diffInHours;
+            const totalFoodBonus = (hourlyFoodBonus + foodFromFarm) * diffInHours;
+            const totalUnemployedBonus = unemployedFromBuildings * diffInHours;
+            
+            const updates: DocumentData = {};
+            if(totalMoneyBonus > 0) updates.money = increment(totalMoneyBonus);
+            if(totalFoodBonus > 0) updates.food = increment(totalFoodBonus);
+            if(totalUnemployedBonus > 0) updates.unemployed = increment(totalUnemployedBonus);
+            
+            if (Object.keys(updates).length > 0) {
+                batch.update(userDocRef, updates);
+                hasUpdate = true;
             }
         }
     }
@@ -239,8 +242,6 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             // --- ATTACK MISSION ---
             } else if (missionData.type === 'attack') {
                 batch.update(userDocRef, { [`lastAttackOn.${missionData.defenderId}`]: serverTimestamp() });
-                const titlesSnapshot = await getDocs(collection(db, 'titles'));
-                const titles = titlesSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
 
                 const getBonus = (user: UserProfile, type: 'attack' | 'defense' | 'resource') => {
                     const title = [...titles].reverse().find(t => (user.pride ?? 0) >= (t as any).prideRequired);
@@ -250,10 +251,9 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 const attackerTitleBonus = getBonus(attackerProfile, 'attack');
                 const defenderTitleBonus = getBonus(defenderProfile, 'defense');
 
-                const buildingEffectsSnap = await getDoc(doc(db, 'game-settings', 'building-effects'));
-                const fortDefenseBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data()?.fort?.defenseBonus ?? 0 : 0;
-                const mobilityAttackBonusPerBuilding = buildingEffectsSnap.exists() ? buildingEffectsSnap.data()?.mobility?.attackBonus ?? 0 : 0;
-
+                const mobilityAttackBonusPerBuilding = effectsData.mobility?.attackBonus ?? 0;
+                const fortDefenseBonusPerBuilding = effectsData.fort?.defenseBonus ?? 0;
+                
                 const attackerMobilityBonus = (attackerProfile.buildings?.mobility ?? 0) * mobilityAttackBonusPerBuilding;
                 const defenderFortBonus = (defenderProfile.buildings?.fort ?? 0) * fortDefenseBonusPerBuilding;
                 
