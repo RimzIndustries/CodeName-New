@@ -182,7 +182,8 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 }
                 batch.update(userDocRef, unitReturns);
                 batch.delete(missionDoc.ref);
-                continue;
+                hasUpdate = true; // Mark that an update has occurred
+                continue; // Skip to the next mission
             }
 
             const defenderProfile = defenderSnap.data() as UserProfile;
