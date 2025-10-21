@@ -58,6 +58,7 @@ const GameAdviceInputSchema = z.object({
       money: z.number(),
       food: z.number(),
       land: z.number(),
+      unemployed: z.number(),
     }),
     globalBonuses: z.object({
       money: z.number(),
@@ -72,7 +73,7 @@ const GameAdviceInputSchema = z.object({
         trainingTime: z.number(),
     }),
     effects: BuildingEffectsSchema,
-    titles: z.array(GameTitleSchema),
+    titles: z.array(GameTitleSchema).describe('The list of all available player titles and their bonuses.'),
     mechanics: z.object({
         votingPowerDivisor: z.number(),
     }),
@@ -86,6 +87,7 @@ const SuggestedChangesSchema = z.object({
       money: z.number().optional(),
       food: z.number().optional(),
       land: z.number().optional(),
+      unemployed: z.number().optional(),
   }).optional(),
   globalBonuses: z.object({
       money: z.number().optional(),
@@ -107,11 +109,11 @@ const SuggestedChangesSchema = z.object({
     barracks: z.object({ unemployed: z.number().optional(), trainingBonus: z.number().optional() }).optional(),
     mobility: z.object({ unemployed: z.number().optional(), attackBonus: z.number().optional() }).optional(),
     tambang: z.object({ unemployed: z.number().optional(), money: z.number().optional() }).optional(),
-  }).optional(),
+  }).deepPartial().optional(),
   mechanics: z.object({
       votingPowerDivisor: z.number().optional(),
   }).optional(),
-}).describe("A JSON object with the specific settings the AI suggests changing. Only include keys and values that should be modified. Do not include settings that should remain the same.");
+}).describe("A JSON object with the specific settings the AI suggests changing. Only include keys and values that should be modified. Do not include settings that should remain the same. Do not suggest changes to titles.");
 
 
 const GameAdviceOutputSchema = z.object({
@@ -128,18 +130,18 @@ export async function getGameAdvice(input: GameAdviceInput): Promise<GameAdviceO
 
 const prompt = ai.definePrompt({
   name: 'gameAdvicePrompt',
-  model: googleAI.model('gemini-1.5-flash'),
+  model: googleAI.model('gemini-1.5-pro-latest'),
   input: {schema: GameAdviceInputSchema},
   output: {schema: GameAdviceOutputSchema},
   prompt: `Anda adalah seorang ahli desainer dan analis keseimbangan game untuk sebuah game strategi multipemain berbasis web bernama 'Code Name'.
 
-Anda akan diberikan pengaturan game saat ini dan sebuah pertanyaan dari administrator game. Tugas Anda adalah memberikan saran yang berwawasan, seimbang, dan dapat ditindaklanjuti. Analisis data yang diberikan untuk mengidentifikasi potensi ketidakseimbangan, eksploitasi, atau area untuk perbaikan.
+Anda akan diberikan pengaturan game saat ini dan sebuah pertanyaan dari administrator game. Tugas Anda adalah memberikan saran yang berwawasan, seimbang, dan dapat ditindaklanjuti. Analisis data yang diberikan untuk mengidentifikasi potensi ketidakseimbangan, eksploitasi, atau area untuk perbaikan. Perhatikan bagaimana bonus dari gelar ('titles') dapat memengaruhi kekuatan pemain di berbagai tahap permainan.
 
 Respons Anda HARUS dalam Bahasa Indonesia dan terdiri dari empat bagian:
 1.  **analysis**: Penjelasan detail dan beralasan tentang observasi Anda dan 'mengapa' di balik setiap masalah yang Anda lihat.
 2.  **recommendation**: Saran konkret Anda tentang apa yang harus diubah.
 3.  **potentialRisks**: Tinjauan singkat tentang apa yang mungkin salah atau apa yang harus diwaspadai jika perubahan ini diterapkan.
-4.  **suggestedChanges**: Objek JSON terstruktur yang HANYA berisi nilai-nilai spesifik yang Anda rekomendasikan untuk diubah. Jika sebuah nilai harus tetap sama, JANGAN sertakan dalam objek. Misalnya, jika pertanyaannya adalah "buat unit elit lebih murah" dan biaya saat ini adalah 950, \`suggestedChanges\` Anda mungkin \`{ "costs": { "units": { "elite": 800 } } }\`. Jangan sarankan perubahan pada gelar.
+4.  **suggestedChanges**: Objek JSON terstruktur yang HANYA berisi nilai-nilai spesifik yang Anda rekomendasikan untuk diubah. Jika sebuah nilai harus tetap sama, JANGAN sertakan dalam objek. Misalnya, jika pertanyaannya adalah "buat unit elit lebih murah" dan biaya saat ini adalah 950, \`suggestedChanges\` Anda mungkin \`{ "costs": { "units": { "elite": 800 } } }\`. **ANDA TIDAK DIIZINKAN UNTUK MENYARANKAN PERUBAHAN PADA GELAR ('TITLES').**
 
 Pertanyaan Administrator:
 "{{{query}}}"
