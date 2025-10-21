@@ -3,7 +3,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Shield, Swords, ShieldOff, Skull, Tent, Coins, Eye } from 'lucide-react';
+import { Shield, Swords, ShieldOff, Skull, Tent, Coins, Eye, MapPin } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
@@ -23,6 +23,7 @@ interface Report {
     unitsLostAttacker?: Record<string, number>;
     unitsLostDefender?: Record<string, number>;
     resourcesPlundered?: { money: number; food: number };
+    landStolen?: number;
     intel?: {
         money: number;
         food: number;
@@ -73,7 +74,8 @@ export default function ReportsPage() {
                     report.unitsLostAttacker = data.unitsLostAttacker;
                     report.unitsLostDefender = data.unitsLostDefender;
                     report.resourcesPlundered = data.resourcesPlundered;
-                } else if (data.type === 'spy') {
+                    report.landStolen = data.landStolen;
+                } else if (data.type === 'spy' || data.type === 'spy-received') {
                     report.type = data.attackerId === user.uid ? 'spy-sent' : 'spy-received';
                     report.outcome = data.outcomeForAttacker;
                     if (report.outcome === 'success' && report.type === 'spy-sent') {
@@ -203,21 +205,31 @@ export default function ReportsPage() {
                                             )) : <p>Tidak ada pasukan yang hilang.</p>}
                                         </div>
                                     </div>
-                                    {report.resourcesPlundered && (report.resourcesPlundered.money > 0 || report.resourcesPlundered.food > 0) && (
+                                    {(report.resourcesPlundered && (report.resourcesPlundered.money > 0 || report.resourcesPlundered.food > 0)) || (report.landStolen && report.landStolen > 0) ? (
                                         <div className="space-y-2">
                                             <h4 className="font-semibold text-yellow-500 flex items-center gap-2"><Coins className="h-4 w-4" /> Hasil Jarahan</h4>
                                             <div className="p-2 border rounded-md bg-muted/50 text-xs space-y-1">
-                                                <div className="flex justify-between">
-                                                    <span>Uang:</span>
-                                                    <span>{report.resourcesPlundered.money.toLocaleString()} uFtB</span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                    <span>Makanan:</span>
-                                                    <span>{report.resourcesPlundered.food.toLocaleString()} mFtB</span>
-                                                </div>
+                                                {report.resourcesPlundered?.money > 0 && (
+                                                    <div className="flex justify-between">
+                                                        <span>Uang:</span>
+                                                        <span>{report.resourcesPlundered.money.toLocaleString()} uFtB</span>
+                                                    </div>
+                                                )}
+                                                {report.resourcesPlundered?.food > 0 && (
+                                                    <div className="flex justify-between">
+                                                        <span>Makanan:</span>
+                                                        <span>{report.resourcesPlundered.food.toLocaleString()} mFtB</span>
+                                                    </div>
+                                                )}
+                                                {report.landStolen > 0 && (
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="flex items-center gap-1"><MapPin className="h-3 w-3"/>Tanah:</span>
+                                                        <span>{report.landStolen.toLocaleString()} tFtB</span>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
-                                    )}
+                                    ): null}
                                 </div>
                                ) : report.type === 'spy-sent' && report.outcome === 'success' && report.intel ? (
                                 <div className="space-y-2">
@@ -236,7 +248,7 @@ export default function ReportsPage() {
                                     </div>
                                 </div>
                                ) : (
-                                <p className="text-muted-foreground">{report.outcome === 'failure' ? 'Mata-mata Anda gagal menyusup dan tidak kembali.' : 'Anda diserang oleh mata-mata musuh.'}</p>
+                                <p className="text-muted-foreground">{report.type === 'spy-sent' && report.outcome === 'failure' ? 'Mata-mata Anda gagal menyusup dan tidak kembali.' : 'Anda diserang oleh mata-mata musuh.'}</p>
                                )}
                             </AccordionContent>
                         </AccordionItem>
@@ -247,5 +259,3 @@ export default function ReportsPage() {
     </div>
   );
 }
-
-    

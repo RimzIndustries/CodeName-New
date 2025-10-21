@@ -224,7 +224,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     // Spies are lost, but defender is notified
                     const defenderReportRef = doc(collection(db, 'reports'));
                      batch.set(defenderReportRef, {
-                        type: 'spy',
+                        type: 'spy-received',
                         involvedUsers: [defenderProfile.uid],
                         attackerId: null, // Attacker is unknown to defender
                         defenderId: defenderProfile.uid,
@@ -272,15 +272,18 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 let outcomeForAttacker: 'win' | 'loss';
                 let attackerLossPercent = 0;
                 let defenderLossPercent = 0;
+                let landStolenPercent = 0;
 
                 if (powerRatio > 1.2) {
                     outcomeForAttacker = 'win';
                     attackerLossPercent = 0.1;
                     defenderLossPercent = 0.7;
+                    landStolenPercent = 0.05; // 5% land
                 } else if (powerRatio > 1) {
                     outcomeForAttacker = 'win';
                     attackerLossPercent = 0.3;
                     defenderLossPercent = 0.5;
+                    landStolenPercent = 0.02; // 2% land
                 } else if (powerRatio > 0.8) { 
                     outcomeForAttacker = 'loss'; 
                     attackerLossPercent = 0.6;
@@ -309,6 +312,29 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                         defenderUpdates[`units.${u}`] = increment(-lost);
                     }
                 }
+                
+                const resourcesPlundered = { money: 0, food: 0 };
+                let landStolen = 0;
+                
+                if (outcomeForAttacker === 'win') {
+                    // Land plunder
+                    landStolen = Math.floor(defenderProfile.land * landStolenPercent);
+                    if (landStolen > 0) {
+                        defenderUpdates['land'] = increment(-landStolen);
+                    }
+
+                    // Resource plunder
+                    const plunderCapacity = (missionData.units.raider || 0) * 100;
+                    const moneyPlundered = Math.min(defenderProfile.money * 0.1, plunderCapacity / 2);
+                    const foodPlundered = Math.min(defenderProfile.food * 0.1, plunderCapacity / 2);
+                    
+                    resourcesPlundered.money = Math.floor(moneyPlundered);
+                    resourcesPlundered.food = Math.floor(foodPlundered);
+
+                    if (resourcesPlundered.money > 0) defenderUpdates.money = increment(-resourcesPlundered.money);
+                    if (resourcesPlundered.food > 0) defenderUpdates.food = increment(-resourcesPlundered.food);
+                }
+                
                 if (Object.keys(defenderUpdates).length > 0) {
                     batch.update(defenderRef, defenderUpdates);
                 }
@@ -319,31 +345,15 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                         survivingUpdates[`units.${unit}`] = increment(survivingAttackers[unit]);
                     }
                 }
+                // Add plundered resources and land to attacker
+                if (resourcesPlundered.money > 0) survivingUpdates.money = increment(resourcesPlundered.money);
+                if (resourcesPlundered.food > 0) survivingUpdates.food = increment(resourcesPlundered.food);
+                if (landStolen > 0) survivingUpdates.land = increment(landStolen);
+
                 if(Object.keys(survivingUpdates).length > 0) {
                   batch.update(userDocRef, survivingUpdates);
                 }
-
-                const resourcesPlundered = { money: 0, food: 0 };
-                if (outcomeForAttacker === 'win') {
-                    const plunderCapacity = (missionData.units.raider || 0) * 100;
-                    const moneyPlundered = Math.min(defenderProfile.money * 0.1, plunderCapacity / 2);
-                    const foodPlundered = Math.min(defenderProfile.food * 0.1, plunderCapacity / 2);
-                    
-                    resourcesPlundered.money = Math.floor(moneyPlundered);
-                    resourcesPlundered.food = Math.floor(foodPlundered);
-
-                    if (resourcesPlundered.money > 0 || resourcesPlundered.food > 0) {
-                        batch.update(defenderRef, { 
-                            money: increment(-resourcesPlundered.money),
-                            food: increment(-resourcesPlundered.food)
-                        });
-                        batch.update(userDocRef, { 
-                            money: increment(resourcesPlundered.money),
-                            food: increment(resourcesPlundered.food)
-                        });
-                    }
-                }
-
+                
                 const reportRef = doc(collection(db, 'reports'));
                 batch.set(reportRef, {
                     type: 'attack',
@@ -356,6 +366,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     unitsLostAttacker,
                     unitsLostDefender,
                     resourcesPlundered,
+                    landStolen,
                     timestamp: serverTimestamp(),
                     readBy: { [attackerProfile.uid]: false, [defenderProfile.uid]: false }
                 });
