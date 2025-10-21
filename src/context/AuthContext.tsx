@@ -168,10 +168,12 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
 
     // --- Mission Queue Logic (Attack & Spy) ---
     try {
-        const missionQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid), where('arrivalTime', '<=', now));
+        const missionQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid));
         const missionSnapshot = await getDocs(missionQuery);
+        
+        const missionsToProcess = missionSnapshot.docs.filter(doc => doc.data().arrivalTime.toDate() <= now.toDate());
 
-        for (const missionDoc of missionSnapshot.docs) {
+        for (const missionDoc of missionsToProcess) {
             const missionData = missionDoc.data();
             const defenderRef = doc(db, 'users', missionData.defenderId);
             const defenderSnap = await getDoc(defenderRef);
@@ -535,3 +537,5 @@ export const useAuth = () => {
   }
   return context;
 };
+
+    

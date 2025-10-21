@@ -36,6 +36,7 @@ interface UnitCounts {
 
 interface AttackJob {
     id: string;
+    attackerId: string;
     attackerName: string;
     defenderName: string;
     arrivalTime: Timestamp;
@@ -583,5 +584,7 @@ export default function CommandPage() {
         </div>
     );
 }
+
+    
 
     
