@@ -128,15 +128,14 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     
     // --- Construction & Training Queue Logic ---
     try {
-        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid));
+        const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
         
-        const completedConstruction = constructionSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now.toDate());
-        if (completedConstruction.length > 0) {
+        if (!constructionSnapshot.empty) {
             const buildingUpdates: { [key: string]: any } = {};
-            completedConstruction.forEach(doc => {
+            constructionSnapshot.forEach(doc => {
                 const job = doc.data();
                 buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
                 batch.delete(doc.ref);
@@ -145,10 +144,9 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             hasUpdate = true;
         }
 
-        const completedTraining = trainingSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now.toDate());
-        if (completedTraining.length > 0) {
+        if (!trainingSnapshot.empty) {
             const unitUpdates: { [key: string]: any } = {};
-            completedTraining.forEach(doc => {
+            trainingSnapshot.forEach(doc => {
               const job = doc.data();
               unitUpdates[`units.${job.unitId}`] = increment(job.amount);
               batch.delete(doc.ref);
@@ -164,11 +162,10 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
 
     // --- Mission Queue Logic (Attack & Spy) ---
     try {
-        const missionQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid));
+        const missionQuery = query(collection(db, 'attackQueue'), where('attackerId', '==', uid), where('arrivalTime', '<=', now));
         const missionSnapshot = await getDocs(missionQuery);
-        const completedMissions = missionSnapshot.docs.filter(doc => doc.data().arrivalTime.toDate() <= now.toDate());
 
-        for (const missionDoc of completedMissions) {
+        for (const missionDoc of missionSnapshot.docs) {
             const missionData = missionDoc.data();
             const defenderRef = doc(db, 'users', missionData.defenderId);
             const defenderSnap = await getDoc(defenderRef);
@@ -226,9 +223,9 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                      batch.set(defenderReportRef, {
                         type: 'spy-received',
                         involvedUsers: [defenderProfile.uid],
-                        attackerId: null, // Attacker is unknown to defender
+                        attackerId: attackerProfile.uid,
                         defenderId: defenderProfile.uid,
-                        attackerName: 'Mata-mata Asing',
+                        attackerName: attackerProfile.prideName,
                         defenderName: defenderProfile.prideName,
                         outcomeForAttacker: 'failure', // From defender's POV, it's a defense success
                         timestamp: serverTimestamp(),
@@ -371,6 +368,8 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     unitsLostDefender,
                     resourcesPlundered,
                     landStolen,
+                    attackerPower: Math.floor(attackerPower),
+                    defenderPower: Math.floor(defenderPower),
                     timestamp: serverTimestamp(),
                     readBy: { [attackerProfile.uid]: false, [defenderProfile.uid]: false }
                 });
