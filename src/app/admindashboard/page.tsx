@@ -761,9 +761,6 @@ export default function AdminDashboardPage() {
         return;
       }
       
-      // Note: Deleting auth users is a privileged backend operation.
-      // This client-side code will only delete Firestore data.
-      // A Cloud Function would be needed to delete the actual auth accounts.
       const batch = writeBatch(db);
       usersSnapshot.forEach(userDoc => {
           batch.delete(userDoc.ref);
@@ -772,7 +769,7 @@ export default function AdminDashboardPage() {
       
       toast({
         title: "Penghapusan Berhasil",
-        description: `Data Firestore untuk ${usersSnapshot.size} pemain telah dihapus. Hapus akun Auth mereka secara manual melalui Firebase Console atau dengan fungsi backend.`,
+        description: `Data Firestore untuk ${usersSnapshot.size} pemain telah dihapus. Akun autentikasi mereka harus dihapus secara manual.`,
       });
       setUsers(users.filter(u => u.role === 'admin'));
 
@@ -1001,6 +998,7 @@ export default function AdminDashboardPage() {
                 money: initialMoney,
                 food: initialFood,
                 land: initialLand,
+                unemployed: initialUnemployed
             },
             globalBonuses: {
                 money: hourlyMoneyBonus,
@@ -1058,6 +1056,7 @@ export default function AdminDashboardPage() {
             if (suggestedChanges.initialResources.money !== undefined) setInitialMoney(suggestedChanges.initialResources.money);
             if (suggestedChanges.initialResources.food !== undefined) setInitialFood(suggestedChanges.initialResources.food);
             if (suggestedChanges.initialResources.land !== undefined) setInitialLand(suggestedChanges.initialResources.land);
+            if (suggestedChanges.initialResources.unemployed !== undefined) setInitialUnemployed(suggestedChanges.initialResources.unemployed);
             changesMade = true;
         }
 
@@ -2300,4 +2299,4 @@ export default function AdminDashboardPage() {
   );
 }
 
-    
+  
