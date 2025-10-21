@@ -262,7 +262,8 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 const totalDefenderBonus = defenderTitleBonus + defenderFortBonus;
 
                 const attackerPower = (missionData.units.attack || 0) * 10 * (1 + totalAttackerBonus / 100) + 
-                                      (missionData.units.elite || 0) * 13 * (1 + totalAttackerBonus / 100);
+                                      (missionData.units.elite || 0) * 13 * (1 + totalAttackerBonus / 100) +
+                                      (missionData.units.raider || 0) * 2 * (1 + totalAttackerBonus / 100);
 
                 const defenderPower = (defenderProfile.units.defense || 0) * 10 * (1 + totalDefenderBonus / 100) +
                                       (defenderProfile.units.elite || 0) * 5 * (1 + totalDefenderBonus / 100);
@@ -323,10 +324,13 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                         defenderUpdates['land'] = increment(-landStolen);
                     }
 
-                    // Resource plunder
-                    const plunderCapacity = (missionData.units.raider || 0) * 100;
-                    const moneyPlundered = Math.min(defenderProfile.money * 0.1, plunderCapacity / 2);
-                    const foodPlundered = Math.min(defenderProfile.food * 0.1, plunderCapacity / 2);
+                    // Resource plunder based on surviving raiders
+                    const plunderCapacity = (survivingAttackers.raider || 0) * 100;
+                    const maxPlunderableMoney = defenderProfile.money * 0.1;
+                    const maxPlunderableFood = defenderProfile.food * 0.1;
+                    
+                    const moneyPlundered = Math.min(maxPlunderableMoney, plunderCapacity / 2);
+                    const foodPlundered = Math.min(maxPlunderableFood, plunderCapacity / 2);
                     
                     resourcesPlundered.money = Math.floor(moneyPlundered);
                     resourcesPlundered.food = Math.floor(foodPlundered);
@@ -526,3 +530,5 @@ export const useAuth = () => {
   }
   return context;
 };
+
+    
