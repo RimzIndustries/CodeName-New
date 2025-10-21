@@ -84,7 +84,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         getDocs(titlesRef)
     ]);
 
-    const bonusData = bonusesDocSnap.exists() ? bonusesDocSnap.data() : {};
+    const bonusData = bonusesDocSnap.exists() ? bonusesDocSnap.data() : { money: 0, food: 0 };
     const effectsData = buildingEffectsSnap.exists() ? buildingEffectsSnap.data() : {};
     const titles = titlesSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
 
@@ -549,7 +549,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
-  
-
-  
