@@ -2128,9 +2128,9 @@ export default function AdminDashboardPage() {
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Hapus Semua Akun Pemain?</AlertDialogTitle>
+                            <AlertDialogTitle>Hapus Data Semua Pemain?</AlertDialogTitle>
                             <AlertDialogDescription>
-                               Tindakan ini akan menghapus semua data pemain non-admin dari database DAN menghapus akun autentikasi mereka secara permanen. Pemain yang dihapus harus mendaftar ulang. Tindakan ini tidak dapat diurungkan.
+                               Tindakan ini akan menghapus semua data pemain non-admin dari database Firestore. Ini TIDAK akan menghapus akun autentikasi mereka; mereka masih bisa masuk, tetapi datanya akan hilang (dan mungkin dibuat ulang saat masuk).
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
@@ -2139,7 +2139,7 @@ export default function AdminDashboardPage() {
                               onClick={handleDeleteAllPlayers}
                               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             >
-                              Ya, Hapus Semua Pemain
+                              Ya, Hapus Data Pemain
                             </AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>
@@ -2205,8 +2205,7 @@ export default function AdminDashboardPage() {
               <Input 
                 id="edit-title-resource" 
                 type="number" 
-                value={editFormData.resourceBonus ?? 0} 
-                onChange={e => setEditFormData(prev => ({...prev, resourceBonus: Number(e.target.value)}))} 
+                value={editFormData.resourceBonus ?? 0} onChange={e => setEditFormData(prev => ({...prev, resourceBonus: Number(e.target.value)}))} 
                 min="0" 
               />
             </div>
