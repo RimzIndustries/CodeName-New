@@ -129,7 +129,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     // --- Construction & Training Queue Logic ---
     try {
         const constructionQuery = query(collection(db, 'constructionQueue'), where('userId', '==', uid));
-        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid), where('completionTime', '<=', now));
+        const trainingQuery = query(collection(db, 'trainingQueue'), where('userId', '==', uid));
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
         
@@ -152,8 +152,10 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             const unitUpdates: { [key: string]: any } = {};
             trainingSnapshot.forEach(doc => {
               const job = doc.data();
-              unitUpdates[`units.${job.unitId}`] = increment(job.amount);
-              batch.delete(doc.ref);
+              if (job.completionTime.toDate() <= now.toDate()) {
+                  unitUpdates[`units.${job.unitId}`] = increment(job.amount);
+                  batch.delete(doc.ref);
+              }
             });
             if(Object.keys(unitUpdates).length > 0) {
               batch.update(userDocRef, unitUpdates);

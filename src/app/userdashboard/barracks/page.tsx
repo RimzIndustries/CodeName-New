@@ -448,5 +448,3 @@ export default function BarracksPage() {
     </Card>
   );
 }
-
-    
