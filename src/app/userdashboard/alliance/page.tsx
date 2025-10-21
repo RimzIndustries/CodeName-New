@@ -487,7 +487,7 @@ export default function AlliancePage() {
                                       id="logo-url"
                                       value={newLogoUrl}
                                       onChange={e => setNewLogoUrl(e.target.value)}
-                                      placeholder="https://example.com/logo.png"
+                                      placeholder="https://placehold.co/128x128.png"
                                       required
                                   />
                               </div>
@@ -657,5 +657,3 @@ export default function AlliancePage() {
     </div>
   );
 }
-
-    
