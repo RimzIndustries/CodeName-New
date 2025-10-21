@@ -133,34 +133,28 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
         
-        if (!constructionSnapshot.empty) {
+        const completedConstructions = constructionSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now.toDate());
+        if (completedConstructions.length > 0) {
             const buildingUpdates: { [key: string]: any } = {};
-            constructionSnapshot.forEach(doc => {
+            completedConstructions.forEach(doc => {
                 const job = doc.data();
-                if (job.completionTime.toDate() <= now.toDate()) {
-                    buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
-                    batch.delete(doc.ref);
-                }
+                buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
+                batch.delete(doc.ref);
             });
-            if (Object.keys(buildingUpdates).length > 0) {
-              batch.update(userDocRef, buildingUpdates);
-              hasUpdate = true;
-            }
+            batch.update(userDocRef, buildingUpdates);
+            hasUpdate = true;
         }
 
-        if (!trainingSnapshot.empty) {
+        const completedTrainings = trainingSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now.toDate());
+        if (completedTrainings.length > 0) {
             const unitUpdates: { [key: string]: any } = {};
-            trainingSnapshot.forEach(doc => {
+            completedTrainings.forEach(doc => {
               const job = doc.data();
-              if (job.completionTime.toDate() <= now.toDate()) {
-                  unitUpdates[`units.${job.unitId}`] = increment(job.amount);
-                  batch.delete(doc.ref);
-              }
+              unitUpdates[`units.${job.unitId}`] = increment(job.amount);
+              batch.delete(doc.ref);
             });
-            if(Object.keys(unitUpdates).length > 0) {
-              batch.update(userDocRef, unitUpdates);
-              hasUpdate = true;
-            }
+            batch.update(userDocRef, unitUpdates);
+            hasUpdate = true;
         }
     } catch (error) {
         console.error("Error processing queues:", error);
@@ -537,5 +531,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
-    
