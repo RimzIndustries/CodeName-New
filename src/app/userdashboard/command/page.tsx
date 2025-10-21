@@ -209,6 +209,8 @@ export default function CommandPage() {
 
     const filteredPlayerTargets = useMemo(() => {
         if (!userProfile) return [];
+        const twelveHoursAgo = Date.now() - (12 * 60 * 60 * 1000);
+
         return targets.filter(target => {
             // Cannot attack own alliance members
             if (target.allianceId && target.allianceId === userProfile.allianceId) {
@@ -218,6 +220,13 @@ export default function CommandPage() {
             if (target.province === userProfile.province) {
                 return false;
             }
+            
+            // Cannot attack if target is on cooldown
+            const lastAttackTimestamp = userProfile.lastAttackOn?.[target.id];
+            if (lastAttackTimestamp && lastAttackTimestamp.toMillis() > twelveHoursAgo) {
+                return false;
+            }
+
             return true;
         });
     }, [targets, userProfile]);
@@ -386,7 +395,7 @@ export default function CommandPage() {
                     <Card>
                         <CardHeader className="p-4">
                             <CardTitle className="text-lg text-accent">Serangan Reguler</CardTitle>
-                            <CardDescription>Kirim pasukan untuk menyerang pemain di provinsi lain. Pasukan bertahan tidak bisa menyerang.</CardDescription>
+                            <CardDescription>Kirim pasukan untuk menyerang pemain di provinsi lain. Pasukan bertahan tidak bisa menyerang. Ada jeda 12 jam setelah menyerang target.</CardDescription>
                         </CardHeader>
                         <CardContent className="p-4 space-y-4">
                             <div className="space-y-1">

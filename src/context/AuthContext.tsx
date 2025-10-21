@@ -133,33 +133,29 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         
         const [constructionSnapshot, trainingSnapshot] = await Promise.all([getDocs(constructionQuery), getDocs(trainingQuery)]);
         
-        if (!constructionSnapshot.empty) {
+        const completedConstruction = constructionSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now.toDate());
+        if (completedConstruction.length > 0) {
             const buildingUpdates: { [key: string]: any } = {};
-            constructionSnapshot.docs.forEach(doc => {
+            completedConstruction.forEach(doc => {
                 const job = doc.data();
-                if (job.completionTime.toDate() <= now.toDate()) {
-                    buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
-                    batch.delete(doc.ref);
-                    hasUpdate = true;
-                }
+                buildingUpdates[`buildings.${job.buildingId}`] = increment(job.amount);
+                batch.delete(doc.ref);
             });
-            if (Object.keys(buildingUpdates).length > 0) {
-              batch.update(userDocRef, buildingUpdates);
-            }
+            batch.update(userDocRef, buildingUpdates);
+            hasUpdate = true;
         }
 
-        if (!trainingSnapshot.empty) {
+        const completedTraining = trainingSnapshot.docs.filter(doc => doc.data().completionTime.toDate() <= now.toDate());
+        if (completedTraining.length > 0) {
             const unitUpdates: { [key: string]: any } = {};
-            trainingSnapshot.docs.forEach(doc => {
+            completedTraining.forEach(doc => {
               const job = doc.data();
-               if (job.completionTime.toDate() <= now.toDate()) {
-                  unitUpdates[`units.${job.unitId}`] = increment(job.amount);
-                  batch.delete(doc.ref);
-                  hasUpdate = true;
-               }
+              unitUpdates[`units.${job.unitId}`] = increment(job.amount);
+              batch.delete(doc.ref);
             });
             if(Object.keys(unitUpdates).length > 0) {
               batch.update(userDocRef, unitUpdates);
+              hasUpdate = true;
             }
         }
     } catch (error) {
@@ -225,12 +221,25 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     batch.update(userDocRef, survivingUpdates);
                 } else {
                     reportPayload.outcomeForAttacker = 'failure';
-                    // Spies are lost
+                    // Spies are lost, but defender is notified
+                    const defenderReportRef = doc(collection(db, 'reports'));
+                     batch.set(defenderReportRef, {
+                        type: 'spy',
+                        involvedUsers: [defenderProfile.uid],
+                        attackerId: null, // Attacker is unknown to defender
+                        defenderId: defenderProfile.uid,
+                        attackerName: 'Mata-mata Asing',
+                        defenderName: defenderProfile.prideName,
+                        outcomeForAttacker: 'failure', // From defender's POV, it's a defense success
+                        timestamp: serverTimestamp(),
+                        readBy: { [defenderProfile.uid]: false }
+                    });
                 }
                 batch.set(reportRef, reportPayload);
 
             // --- ATTACK MISSION ---
             } else if (missionData.type === 'attack') {
+                batch.update(userDocRef, { [`lastAttackOn.${missionData.defenderId}`]: serverTimestamp() });
                 const titlesSnapshot = await getDocs(collection(db, 'titles'));
                 const titles = titlesSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
 
