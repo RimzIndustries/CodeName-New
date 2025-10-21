@@ -253,19 +253,25 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
 
                 const mobilityAttackBonusPerBuilding = effectsData.mobility?.attackBonus ?? 0;
                 const fortDefenseBonusPerBuilding = effectsData.fort?.defenseBonus ?? 0;
+                const universityEliteBonusPerBuilding = effectsData.university?.eliteBonus ?? 0;
                 
                 const attackerMobilityBonus = (attackerProfile.buildings?.mobility ?? 0) * mobilityAttackBonusPerBuilding;
                 const defenderFortBonus = (defenderProfile.buildings?.fort ?? 0) * fortDefenseBonusPerBuilding;
+
+                const attackerEliteBonus = (attackerProfile.buildings?.university ?? 0) * universityEliteBonusPerBuilding;
+                const defenderEliteBonus = (defenderProfile.buildings?.university ?? 0) * universityEliteBonusPerBuilding;
                 
                 const totalAttackerBonus = attackerTitleBonus + attackerMobilityBonus;
                 const totalDefenderBonus = defenderTitleBonus + defenderFortBonus;
 
-                const attackerPower = (missionData.units.attack || 0) * 10 * (1 + totalAttackerBonus / 100) + 
-                                      (missionData.units.elite || 0) * 13 * (1 + totalAttackerBonus / 100) +
-                                      (missionData.units.raider || 0) * 2 * (1 + totalAttackerBonus / 100);
+                const attackerPower = 
+                    (missionData.units.attack || 0) * 10 * (1 + totalAttackerBonus / 100) + 
+                    (missionData.units.elite || 0) * 13 * (1 + (totalAttackerBonus + attackerEliteBonus) / 100) +
+                    (missionData.units.raider || 0) * 2 * (1 + totalAttackerBonus / 100);
 
-                const defenderPower = (defenderProfile.units.defense || 0) * 10 * (1 + totalDefenderBonus / 100) +
-                                      (defenderProfile.units.elite || 0) * 5 * (1 + totalDefenderBonus / 100);
+                const defenderPower = 
+                    (defenderProfile.units.defense || 0) * 10 * (1 + totalDefenderBonus / 100) +
+                    (defenderProfile.units.elite || 0) * 5 * (1 + (totalDefenderBonus + defenderEliteBonus) / 100);
 
                 const powerRatio = attackerPower / (defenderPower || 1);
 
@@ -543,5 +549,7 @@ export const useAuth = () => {
   }
   return context;
 };
+
+  
 
   
