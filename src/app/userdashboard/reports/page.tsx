@@ -3,7 +3,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Shield, Swords, ShieldOff, Skull, Tent, Coins, Eye, MapPin } from 'lucide-react';
+import { Shield, Swords, ShieldOff, Skull, Tent, Coins, Eye, MapPin, Crown } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
@@ -24,6 +24,7 @@ interface Report {
     unitsLostDefender?: Record<string, number>;
     resourcesPlundered?: { money: number; food: number };
     landStolen?: number;
+    prideStolen?: number;
     intel?: {
         money: number;
         food: number;
@@ -77,6 +78,7 @@ export default function ReportsPage() {
                     report.unitsLostDefender = data.unitsLostDefender;
                     report.resourcesPlundered = data.resourcesPlundered;
                     report.landStolen = data.landStolen;
+                    report.prideStolen = data.prideStolen;
                     report.attackerPower = data.attackerPower;
                     report.defenderPower = data.defenderPower;
                 } else if (data.type === 'spy' || data.type === 'spy-received') {
@@ -223,7 +225,7 @@ export default function ReportsPage() {
                                                 <span>{enemyPower?.toLocaleString() ?? 'N/A'}</span>
                                             </div>
                                         </div>
-                                        {((report.resourcesPlundered && (report.resourcesPlundered.money > 0 || report.resourcesPlundered.food > 0)) || (report.landStolen && report.landStolen > 0)) && (
+                                        {((report.resourcesPlundered && (report.resourcesPlundered.money > 0 || report.resourcesPlundered.food > 0)) || (report.landStolen && report.landStolen > 0) || (report.prideStolen && report.prideStolen > 0)) && (
                                             <div>
                                                 <h4 className="font-semibold text-yellow-500 flex items-center gap-2 mt-2"><Coins className="h-4 w-4" /> Hasil Jarahan</h4>
                                                 <div className="p-2 border rounded-md bg-muted/50 text-xs space-y-1">
@@ -243,6 +245,12 @@ export default function ReportsPage() {
                                                         <div className="flex justify-between items-center">
                                                             <span className="flex items-center gap-1"><MapPin className="h-3 w-3"/>Tanah:</span>
                                                             <span>{report.landStolen.toLocaleString()} tFtB</span>
+                                                        </div>
+                                                    )}
+                                                    {report.prideStolen > 0 && (
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="flex items-center gap-1"><Crown className="h-3 w-3"/>Pride:</span>
+                                                            <span>{report.prideStolen.toLocaleString()}</span>
                                                         </div>
                                                     )}
                                                 </div>

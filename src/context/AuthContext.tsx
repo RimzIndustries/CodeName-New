@@ -273,17 +273,20 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 let attackerLossPercent = 0;
                 let defenderLossPercent = 0;
                 let landStolenPercent = 0;
+                let prideStolenPercent = 0;
 
                 if (powerRatio > 1.2) {
                     outcomeForAttacker = 'win';
                     attackerLossPercent = 0.1;
                     defenderLossPercent = 0.7;
                     landStolenPercent = 0.05; // 5% land
+                    prideStolenPercent = 0.05; // 5% pride
                 } else if (powerRatio > 1) {
                     outcomeForAttacker = 'win';
                     attackerLossPercent = 0.3;
                     defenderLossPercent = 0.5;
                     landStolenPercent = 0.02; // 2% land
+                    prideStolenPercent = 0.02; // 2% pride
                 } else if (powerRatio > 0.8) { 
                     outcomeForAttacker = 'loss'; 
                     attackerLossPercent = 0.6;
@@ -315,12 +318,19 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 
                 const resourcesPlundered = { money: 0, food: 0 };
                 let landStolen = 0;
+                let prideStolen = 0;
                 
                 if (outcomeForAttacker === 'win') {
                     // Land plunder
                     landStolen = Math.floor(defenderProfile.land * landStolenPercent);
                     if (landStolen > 0) {
                         defenderUpdates['land'] = increment(-landStolen);
+                    }
+                    
+                    // Pride plunder
+                    prideStolen = Math.floor(defenderProfile.pride * prideStolenPercent);
+                    if (prideStolen > 0) {
+                        defenderUpdates['pride'] = increment(-prideStolen);
                     }
 
                     // Resource plunder based on surviving raiders
@@ -348,10 +358,11 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                         survivingUpdates[`units.${unit}`] = increment(survivingAttackers[unit]);
                     }
                 }
-                // Add plundered resources and land to attacker
+                // Add plundered resources, land, and pride to attacker
                 if (resourcesPlundered.money > 0) survivingUpdates.money = increment(resourcesPlundered.money);
                 if (resourcesPlundered.food > 0) survivingUpdates.food = increment(resourcesPlundered.food);
                 if (landStolen > 0) survivingUpdates.land = increment(landStolen);
+                if (prideStolen > 0) survivingUpdates.pride = increment(prideStolen);
 
                 if(Object.keys(survivingUpdates).length > 0) {
                   batch.update(userDocRef, survivingUpdates);
@@ -370,6 +381,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     unitsLostDefender,
                     resourcesPlundered,
                     landStolen,
+                    prideStolen,
                     attackerPower: Math.floor(attackerPower),
                     defenderPower: Math.floor(defenderPower),
                     timestamp: serverTimestamp(),
