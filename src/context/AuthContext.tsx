@@ -182,18 +182,20 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 }
                 batch.update(userDocRef, unitReturns);
                 batch.delete(missionDoc.ref);
-                hasUpdate = true; // Mark that an update has occurred
-                continue; // Skip to the next mission
+                hasUpdate = true;
+                continue; 
             }
 
             const defenderProfile = defenderSnap.data() as UserProfile;
             const attackerProfile = profile; 
 
+            const travelTimeMinutes = 60; // 1 hour travel time
+
             // --- SPY MISSION ---
             if (missionData.type === 'spy') {
                 const totalSpies = missionData.units.spy || 0;
                 const defenderTotalDefenseTroops = defenderProfile.units.defense || 0;
-                // Success chance decreases as defender has more defense troops.
+                
                 const successChance = Math.max(0.05, (totalSpies * 2) / (defenderTotalDefenseTroops || 1));
                 const isSuccess = Math.random() < successChance;
                 
@@ -218,10 +220,15 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                         units: defenderProfile.units,
                         buildings: defenderProfile.buildings
                     };
-                    // Spies return home
-                    const survivingUpdates: { [key: string]: any } = {};
-                    survivingUpdates['units.spy'] = increment(totalSpies);
-                    batch.update(userDocRef, survivingUpdates);
+                    
+                    const returnArrivalTime = Timestamp.fromMillis(Date.now() + travelTimeMinutes * 60 * 1000);
+                    const returnJobRef = doc(collection(db, "returnQueue"));
+                    batch.set(returnJobRef, {
+                        userId: attackerProfile.uid,
+                        survivingUnits: { spy: totalSpies },
+                        arrivalTime: returnArrivalTime
+                    });
+
                 } else {
                     reportPayload.outcomeForAttacker = 'failure';
                     // Spies are lost, but defender is notified
@@ -233,7 +240,7 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                         defenderId: defenderProfile.uid,
                         attackerName: attackerProfile.prideName,
                         defenderName: defenderProfile.prideName,
-                        outcomeForAttacker: 'failure', // From defender's POV, it's a defense success
+                        outcomeForAttacker: 'failure',
                         timestamp: serverTimestamp(),
                         readBy: { [defenderProfile.uid]: false }
                     });
@@ -286,14 +293,14 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     outcomeForAttacker = 'win';
                     attackerLossPercent = 0.1;
                     defenderLossPercent = 0.7;
-                    landStolenPercent = 0.05; // 5% land
-                    prideStolenPercent = 0.05; // 5% pride
+                    landStolenPercent = 0.05; 
+                    prideStolenPercent = 0.05;
                 } else if (powerRatio > 1) {
                     outcomeForAttacker = 'win';
                     attackerLossPercent = 0.3;
                     defenderLossPercent = 0.5;
-                    landStolenPercent = 0.02; // 2% land
-                    prideStolenPercent = 0.02; // 2% pride
+                    landStolenPercent = 0.02;
+                    prideStolenPercent = 0.02;
                 } else if (powerRatio > 0.8) { 
                     outcomeForAttacker = 'loss'; 
                     attackerLossPercent = 0.6;
@@ -328,19 +335,16 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                 let prideStolen = 0;
                 
                 if (outcomeForAttacker === 'win') {
-                    // Land plunder
                     landStolen = Math.floor(defenderProfile.land * landStolenPercent);
                     if (landStolen > 0) {
                         defenderUpdates['land'] = increment(-landStolen);
                     }
                     
-                    // Pride plunder
                     prideStolen = Math.floor(defenderProfile.pride * prideStolenPercent);
                     if (prideStolen > 0) {
                         defenderUpdates['pride'] = increment(-prideStolen);
                     }
 
-                    // Resource plunder based on surviving raiders
                     const plunderCapacity = (survivingAttackers.raider || 0) * 100;
                     const maxPlunderableMoney = defenderProfile.money * 0.1;
                     const maxPlunderableFood = defenderProfile.food * 0.1;
@@ -359,21 +363,14 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
                     batch.update(defenderRef, defenderUpdates);
                 }
                 
-                const survivingUpdates: { [key: string]: any } = {};
-                for (const unit in survivingAttackers) {
-                    if (survivingAttackers[unit] > 0) {
-                        survivingUpdates[`units.${unit}`] = increment(survivingAttackers[unit]);
-                    }
-                }
-                // Add plundered resources, land, and pride to attacker
-                if (resourcesPlundered.money > 0) survivingUpdates.money = increment(resourcesPlundered.money);
-                if (resourcesPlundered.food > 0) survivingUpdates.food = increment(resourcesPlundered.food);
-                if (landStolen > 0) survivingUpdates.land = increment(landStolen);
-                if (prideStolen > 0) survivingUpdates.pride = increment(prideStolen);
-
-                if(Object.keys(survivingUpdates).length > 0) {
-                  batch.update(userDocRef, survivingUpdates);
-                }
+                const returnArrivalTime = Timestamp.fromMillis(Date.now() + travelTimeMinutes * 60 * 1000);
+                const returnJobRef = doc(collection(db, "returnQueue"));
+                batch.set(returnJobRef, {
+                    userId: attackerProfile.uid,
+                    survivingUnits: survivingAttackers,
+                    plundered: { ...resourcesPlundered, land: landStolen, pride: prideStolen },
+                    arrivalTime: returnArrivalTime
+                });
                 
                 const reportRef = doc(collection(db, 'reports'));
                 batch.set(reportRef, {
@@ -403,6 +400,38 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     } catch (error) {
         console.error("Error processing mission queue:", error);
     }
+    
+    // --- Return Queue Logic ---
+    try {
+        const returnQuery = query(collection(db, 'returnQueue'), where('userId', '==', uid));
+        const returnSnapshot = await getDocs(returnQuery);
+        const returnsToProcess = returnSnapshot.docs.filter(doc => doc.data().arrivalTime.toDate() <= now.toDate());
+
+        if (returnsToProcess.length > 0) {
+            const updates: { [key: string]: any } = {};
+            returnsToProcess.forEach(returnDoc => {
+                const data = returnDoc.data();
+                // Return surviving units
+                for (const unit in data.survivingUnits) {
+                    if (data.survivingUnits[unit] > 0) {
+                        updates[`units.${unit}`] = increment(data.survivingUnits[unit]);
+                    }
+                }
+                // Add plundered resources
+                if (data.plundered?.money > 0) updates.money = increment(data.plundered.money);
+                if (data.plundered?.food > 0) updates.food = increment(data.plundered.food);
+                if (data.plundered?.land > 0) updates.land = increment(data.plundered.land);
+                if (data.plundered?.pride > 0) updates.pride = increment(data.plundered.pride);
+
+                batch.delete(returnDoc.ref);
+            });
+            batch.update(userDocRef, updates);
+            hasUpdate = true;
+        }
+    } catch (error) {
+        console.error("Error processing return queue:", error);
+    }
+
 
     // --- Expired Wars Logic ---
     try {
