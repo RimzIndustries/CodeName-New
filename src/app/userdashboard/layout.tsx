@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Shield, Menu, Coins, Heart, MapPin, Building2, BarChart3, Users, Swords, LogOut, Crown, Settings, Bell } from 'lucide-react';
+import { Shield, Menu, Coins, Heart, MapPin, Building2, Globe, Users, Swords, LogOut, Crown, Settings, Bell } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'firebase/auth';
@@ -54,7 +54,7 @@ export default function UserDashboardLayout({
   }
 
   const bottomNavItems = [
-    { href: "/userdashboard", icon: BarChart3, label: "Info" },
+    { href: "/userdashboard", icon: Globe, label: "Info" },
     { href: "/userdashboard/buildings", icon: Building2, label: "Konstruksi" },
     { href: "/userdashboard/command", icon: Swords, label: "Komando" },
     { href: "/userdashboard/alliance", icon: Users, label: "Aliansi" },
@@ -127,43 +127,46 @@ export default function UserDashboardLayout({
 
         {/* Main Content */}
         <main className="flex-1 space-y-4 p-4 sm:px-6 sm:pt-0 md:space-y-8 pb-28 sm:pb-24">
-          {/* Resource Bar */}
-          <div className="grid grid-cols-3 gap-4">
-            <Card className="bg-card/50">
-              <CardContent className="p-4 flex items-center justify-center gap-3">
-                <Coins className="h-6 w-6 text-primary" />
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground">Uang</p>
-                  <p className="text-lg">{Math.floor(userProfile.money ?? 0).toLocaleString()} uFtB</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-card/50">
-              <CardContent className="p-4 flex items-center justify-center gap-3">
-                <Heart className="h-6 w-6 text-primary" />
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground">Makanan</p>
-                  <p className="text-lg">{Math.floor(userProfile.food ?? 0).toLocaleString()} mFtB</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-card/50">
-              <CardContent className="p-4 flex items-center justify-center gap-3">
-                <MapPin className="h-6 w-6 text-primary" />
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground">Tanah</p>
-                  <p className="text-lg">{(userProfile.land ?? 0).toLocaleString()} tFtB</p>
-                </div>
-              </CardContent>
-            </Card>
+          {/* Sticky Resource Bar */}
+          <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-4 bg-background/80 p-4 backdrop-blur-sm sm:-mx-6 sm:px-6">
+              <div className="grid grid-cols-3 gap-4">
+                <Card className="bg-card/50">
+                  <CardContent className="p-2 sm:p-4 flex items-center justify-center gap-2 sm:gap-3">
+                    <Coins className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                    <div className="text-center">
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">Uang</p>
+                      <p className="text-sm sm:text-lg">{Math.floor(userProfile.money ?? 0).toLocaleString()}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-card/50">
+                  <CardContent className="p-2 sm:p-4 flex items-center justify-center gap-2 sm:gap-3">
+                    <Heart className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                    <div className="text-center">
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">Makanan</p>
+                      <p className="text-sm sm:text-lg">{Math.floor(userProfile.food ?? 0).toLocaleString()}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-card/50">
+                  <CardContent className="p-2 sm:p-4 flex items-center justify-center gap-2 sm:gap-3">
+                    <MapPin className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                    <div className="text-center">
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">Tanah</p>
+                      <p className="text-sm sm:text-lg">{(userProfile.land ?? 0).toLocaleString()}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
           </div>
+
 
           {children}
         </main>
       </div>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm sm:hidden">
         <div className="grid h-16 grid-cols-5 items-center justify-items-center gap-1 px-1">
             {bottomNavItems.map((item) => {
                 const isActive = pathname === item.href;
