@@ -8,7 +8,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { Crown, MapIcon as Map, Users, User } from 'lucide-react';
+import { Crown, MapIcon, Users, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -200,7 +200,7 @@ export default function WorldPage() {
                                             </TableHead>
                                             <TableHead className="text-right">
                                                 <Button variant="ghost" onClick={() => handleAllianceSort('totalLand')}>
-                                                    <Map className="h-4 w-4 mr-2" />
+                                                    <MapIcon className="h-4 w-4 mr-2" />
                                                     Total Tanah {renderSortArrow('totalLand', 'alliance')}
                                                 </Button>
                                             </TableHead>
@@ -253,7 +253,7 @@ export default function WorldPage() {
                                             </TableHead>
                                             <TableHead className="text-right">
                                                 <Button variant="ghost" onClick={() => handlePlayerSort('land')}>
-                                                    <Map className="h-4 w-4 mr-2" />
+                                                    <MapIcon className="h-4 w-4 mr-2" />
                                                     Tanah {renderSortArrow('land', 'player')}
                                                 </Button>
                                             </TableHead>
