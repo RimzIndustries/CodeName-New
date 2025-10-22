@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, getDoc, addDoc, serverTimestamp, getDocs, deleteDoc, or, Timestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, getDoc, addDoc, serverTimestamp, getDocs, deleteDoc, or, Timestamp, increment, writeBatch } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
@@ -15,9 +15,10 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import Image from 'next/image';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Crown, Swords, Wrench, Hourglass } from 'lucide-react';
+import { Crown, Swords, Wrench, Hourglass, Handshake } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { differenceInSeconds } from 'date-fns';
 
 
@@ -49,6 +50,14 @@ interface GameTitle {
   prideRequired: number;
 }
 
+interface TransportJob {
+    id: string;
+    senderName: string;
+    type: 'resource' | 'troops';
+    payload: any;
+    arrivalTime: Timestamp;
+}
+
 function WarCountdown({ expiryTimestamp }: { expiryTimestamp: Timestamp }) {
   const [timeLeft, setTimeLeft] = useState('');
 
@@ -74,6 +83,32 @@ function WarCountdown({ expiryTimestamp }: { expiryTimestamp: Timestamp }) {
   }, [expiryTimestamp]);
 
   return <span className="font-mono text-destructive">{timeLeft}</span>;
+}
+
+function TransportCountdown({ arrivalTime }: { arrivalTime: Timestamp }) {
+    const [timeLeft, setTimeLeft] = useState('');
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            const now = new Date();
+            const arrival = arrivalTime.toDate();
+            const secondsRemaining = differenceInSeconds(arrival, now);
+
+            if (secondsRemaining <= 0) {
+                setTimeLeft('Tiba');
+                clearInterval(timer);
+            } else {
+                const hours = Math.floor(secondsRemaining / 3600);
+                const minutes = Math.floor((secondsRemaining % 3600) / 60);
+                const seconds = secondsRemaining % 60;
+                setTimeLeft(`${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`);
+            }
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [arrivalTime]);
+
+    return <span className="font-mono">{timeLeft}</span>;
 }
 
 export default function AlliancePage() {
@@ -105,6 +140,16 @@ export default function AlliancePage() {
     const [isDeclaringWar, setIsDeclaringWar] = useState(false);
     const [activeWar, setActiveWar] = useState<any | null>(null);
     const [enemyAlliance, setEnemyAlliance] = useState<Alliance | null>(null);
+    
+    // Aid state
+    const [isAidDialogOpen, setIsAidDialogOpen] = useState(false);
+    const [aidTarget, setAidTarget] = useState<AllianceMember | null>(null);
+    const [moneyToSend, setMoneyToSend] = useState(0);
+    const [foodToSend, setFoodToSend] = useState(0);
+    const [troopsToSend, setTroopsToSend] = useState<{ [key: string]: number }>({});
+    const [isSendingAid, setIsSendingAid] = useState(false);
+    const [incomingTransports, setIncomingTransports] = useState<TransportJob[]>([]);
+
 
     // Fetch titles
     useEffect(() => {
@@ -139,11 +184,12 @@ export default function AlliancePage() {
     }, []);
 
     useEffect(() => {
-        if (!userProfile?.allianceId) {
+        if (!userProfile?.allianceId || !user) {
             setIsLoading(false);
             setAlliance(null);
             setMembers([]);
             setVotes([]);
+            setIncomingTransports([]);
             return;
         }
 
@@ -209,6 +255,14 @@ export default function AlliancePage() {
                 setEnemyAlliance(null);
             }
         });
+        
+        // Listen for incoming transports
+        const transportQuery = query(collection(db, 'transportQueue'), where('recipientId', '==', user.uid));
+        const transportUnsub = onSnapshot(transportQuery, (snapshot) => {
+            const transportList = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}) as TransportJob);
+            transportList.sort((a, b) => a.arrivalTime.toMillis() - b.arrivalTime.toMillis());
+            setIncomingTransports(transportList);
+        });
 
 
         return () => {
@@ -216,6 +270,7 @@ export default function AlliancePage() {
             membersUnsub();
             votesUnsub();
             warUnsub();
+            transportUnsub();
         };
 
     }, [userProfile?.allianceId, user?.uid]);
@@ -434,6 +489,106 @@ export default function AlliancePage() {
         }
     }
     
+    const openAidDialog = (member: AllianceMember) => {
+        setAidTarget(member);
+        setMoneyToSend(0);
+        setFoodToSend(0);
+        setTroopsToSend({});
+        setIsAidDialogOpen(true);
+    };
+    
+    const handleSendAid = async () => {
+        if (!user || !userProfile || !aidTarget || !userProfile.allianceId) {
+            toast({ title: "Gagal mengirim bantuan", variant: "destructive" });
+            return;
+        }
+
+        setIsSendingAid(true);
+        const batch = writeBatch(db);
+        const userRef = doc(db, 'users', user.uid);
+        
+        const totalMoney = moneyToSend || 0;
+        const totalFood = foodToSend || 0;
+        let totalTroopsSent = 0;
+        
+        const hasResources = totalMoney > 0 || totalFood > 0;
+        const hasTroops = Object.values(troopsToSend).some(val => val > 0);
+
+        if (!hasResources && !hasTroops) {
+            toast({ title: "Tidak ada yang dikirim", description: "Masukkan jumlah sumber daya atau pasukan untuk dikirim.", variant: "destructive" });
+            setIsSendingAid(false);
+            return;
+        }
+
+        // Validate and deduct resources
+        if (hasResources) {
+            if (totalMoney > (userProfile.money ?? 0) || totalFood > (userProfile.food ?? 0)) {
+                toast({ title: "Sumber daya tidak cukup", variant: "destructive" });
+                setIsSendingAid(false);
+                return;
+            }
+            if(totalMoney > 0) batch.update(userRef, { money: increment(-totalMoney) });
+            if(totalFood > 0) batch.update(userRef, { food: increment(-totalFood) });
+        }
+
+        // Validate and deduct troops
+        if (hasTroops) {
+            for (const unit in troopsToSend) {
+                const amount = troopsToSend[unit];
+                totalTroopsSent += amount;
+                if (amount > (userProfile.units?.[unit as keyof typeof userProfile.units] ?? 0)) {
+                    toast({ title: "Pasukan tidak cukup", description: `Anda tidak memiliki cukup ${unit}.`, variant: "destructive" });
+                    setIsSendingAid(false);
+                    return;
+                }
+                if (amount > 0) batch.update(userRef, { [`units.${unit}`]: increment(-amount) });
+            }
+        }
+        
+        const transportTimeMinutes = 180; // 3 hours
+        const arrivalTime = Timestamp.fromMillis(Date.now() + transportTimeMinutes * 60 * 1000);
+        
+        if (hasResources) {
+             const transportRef = doc(collection(db, 'transportQueue'));
+             batch.set(transportRef, {
+                senderId: user.uid,
+                senderName: userProfile.prideName,
+                recipientId: aidTarget.id,
+                recipientName: aidTarget.prideName,
+                allianceId: userProfile.allianceId,
+                type: 'resource',
+                payload: { money: totalMoney, food: totalFood },
+                createdAt: serverTimestamp(),
+                arrivalTime: arrivalTime,
+            });
+        }
+        
+        if (hasTroops) {
+            const transportRef = doc(collection(db, 'transportQueue'));
+             batch.set(transportRef, {
+                senderId: user.uid,
+                senderName: userProfile.prideName,
+                recipientId: aidTarget.id,
+                recipientName: aidTarget.prideName,
+                allianceId: userProfile.allianceId,
+                type: 'troops',
+                payload: { units: troopsToSend },
+                createdAt: serverTimestamp(),
+                arrivalTime: arrivalTime,
+            });
+        }
+
+        try {
+            await batch.commit();
+            toast({ title: "Bantuan Terkirim", description: `Bantuan Anda sedang dalam perjalanan ke ${aidTarget.prideName}.`});
+            setIsAidDialogOpen(false);
+        } catch (error) {
+             console.error("Error sending aid: ", error);
+             toast({ title: "Gagal mengirim bantuan", description: "Terjadi kesalahan.", variant: "destructive" });
+        } finally {
+            setIsSendingAid(false);
+        }
+    };
 
     if (isLoading) {
         return <Card><CardContent className="p-6 text-center">Memuat data aliansi...</CardContent></Card>
@@ -514,6 +669,7 @@ export default function AlliancePage() {
                   <TableHead className="text-right">Tanah</TableHead>
                   <TableHead className="text-right">Suara Diterima</TableHead>
                   <TableHead className="text-right">Hak Pilih</TableHead>
+                  <TableHead className="text-right">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -527,10 +683,15 @@ export default function AlliancePage() {
                       <TableCell className="text-right">{member.land.toLocaleString()}</TableCell>
                       <TableCell className="text-right">{(voteCounts[member.id] || 0).toLocaleString()}</TableCell>
                       <TableCell className="text-right">{Math.floor(member.land / votingPowerDivisor).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">
+                        {member.id !== user?.uid && (
+                           <Button variant="outline" size="sm" onClick={() => openAidDialog(member)}>Kirim Bantuan</Button>
+                        )}
+                      </TableCell>
                   </TableRow>
                 )) : (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">Tidak ada anggota dalam aliansi ini.</TableCell>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">Tidak ada anggota dalam aliansi ini.</TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -588,6 +749,45 @@ export default function AlliancePage() {
           )}
         </CardContent>
       </Card>
+      
+      <Card>
+        <CardHeader>
+            <CardTitle>Bantuan Masuk</CardTitle>
+            <CardDescription>Sumber daya dan pasukan yang sedang dalam perjalanan menuju Anda.</CardDescription>
+        </CardHeader>
+        <CardContent>
+            {incomingTransports.length > 0 ? (
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Dari</TableHead>
+                            <TableHead>Isi Bantuan</TableHead>
+                            <TableHead className="text-right">Tiba Dalam</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {incomingTransports.map(job => (
+                            <TableRow key={job.id}>
+                                <TableCell>{job.senderName}</TableCell>
+                                <TableCell>
+                                    {job.type === 'resource' ?
+                                        `Uang: ${job.payload.money.toLocaleString()}, Makanan: ${job.payload.food.toLocaleString()}` :
+                                        `Pasukan: ${Object.entries(job.payload.units).map(([unit, val]) => `${unit} (${val})`).join(', ')}`
+                                    }
+                                </TableCell>
+                                <TableCell className="text-right">
+                                    <TransportCountdown arrivalTime={job.arrivalTime} />
+                                </TableCell>
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+            ) : (
+                <p className="text-sm text-center text-muted-foreground">Tidak ada bantuan yang sedang dalam perjalanan.</p>
+            )}
+        </CardContent>
+      </Card>
+      
       <Card>
           <CardHeader>
               <CardTitle className="text-destructive">Diplomasi & Perang</CardTitle>
@@ -654,6 +854,49 @@ export default function AlliancePage() {
                 )}
           </CardContent>
       </Card>
+      
+      <Dialog open={isAidDialogOpen} onOpenChange={setIsAidDialogOpen}>
+        <DialogContent>
+            <DialogHeader>
+                <DialogTitle>Kirim Bantuan ke {aidTarget?.prideName}</DialogTitle>
+                <DialogDescription>Pilih sumber daya atau pasukan untuk dikirim. Pengiriman membutuhkan waktu 3 jam.</DialogDescription>
+            </DialogHeader>
+            <Tabs defaultValue="resources" className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="resources">Sumber Daya</TabsTrigger>
+                    <TabsTrigger value="troops">Pasukan</TabsTrigger>
+                </TabsList>
+                <TabsContent value="resources">
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="money-to-send">Uang (Anda Punya: {Math.floor(userProfile?.money ?? 0).toLocaleString()})</Label>
+                            <Input id="money-to-send" type="number" min="0" max={Math.floor(userProfile?.money ?? 0)} value={moneyToSend} onChange={e => setMoneyToSend(Number(e.target.value))} />
+                        </div>
+                         <div className="space-y-2">
+                            <Label htmlFor="food-to-send">Makanan (Anda Punya: {Math.floor(userProfile?.food ?? 0).toLocaleString()})</Label>
+                            <Input id="food-to-send" type="number" min="0" max={Math.floor(userProfile?.food ?? 0)} value={foodToSend} onChange={e => setFoodToSend(Number(e.target.value))} />
+                        </div>
+                    </div>
+                </TabsContent>
+                <TabsContent value="troops">
+                     <div className="space-y-4 py-4">
+                        {Object.keys(userProfile?.units ?? {}).map(unit => (
+                            <div key={unit} className="space-y-2">
+                                <Label htmlFor={`troop-to-send-${unit}`} className="capitalize">{unit} (Anda Punya: {(userProfile?.units?.[unit as keyof typeof userProfile.units] ?? 0).toLocaleString()})</Label>
+                                <Input id={`troop-to-send-${unit}`} type="number" min="0" max={userProfile?.units?.[unit as keyof typeof userProfile.units] ?? 0} value={troopsToSend[unit] || ''} onChange={e => setTroopsToSend(prev => ({...prev, [unit]: Number(e.target.value)}))} />
+                            </div>
+                        ))}
+                    </div>
+                </TabsContent>
+            </Tabs>
+            <DialogFooter>
+                <Button variant="ghost" onClick={() => setIsAidDialogOpen(false)}>Batal</Button>
+                <Button onClick={handleSendAid} disabled={isSendingAid}>
+                    {isSendingAid ? 'Mengirim...' : 'Kirim Bantuan'}
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -447,6 +447,36 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         console.error("Error processing expired wars:", error);
     }
     
+    // --- Transport Queue Logic ---
+    try {
+        const transportQuery = query(collection(db, 'transportQueue'), where('recipientId', '==', uid));
+        const transportSnapshot = await getDocs(transportQuery);
+        const transportsToProcess = transportSnapshot.docs.filter(doc => doc.data().arrivalTime.toDate() <= now.toDate());
+
+        if (transportsToProcess.length > 0) {
+            const updates: { [key: string]: any } = {};
+            transportsToProcess.forEach(transportDoc => {
+                const data = transportDoc.data();
+                if (data.type === 'resource') {
+                    if (data.payload.money > 0) updates.money = increment(data.payload.money);
+                    if (data.payload.food > 0) updates.food = increment(data.payload.food);
+                } else if (data.type === 'troops') {
+                    for (const unit in data.payload.units) {
+                        if (data.payload.units[unit] > 0) {
+                            updates[`units.${unit}`] = increment(data.payload.units[unit]);
+                        }
+                    }
+                }
+                batch.delete(transportDoc.ref);
+            });
+            batch.update(userDocRef, updates);
+            hasUpdate = true;
+        }
+    } catch (error) {
+        console.error("Error processing transport queue:", error);
+    }
+
+    
     batch.update(userDocRef, { lastResourceUpdate: serverTimestamp() });
     hasUpdate = true;
 
@@ -579,5 +609,3 @@ export const useAuth = () => {
   }
   return context;
 };
-
-    
