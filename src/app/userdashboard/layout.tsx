@@ -63,9 +63,8 @@ export default function UserDashboardLayout({
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
-      <div className="flex flex-col sm:gap-4 sm:py-4 sm:pl-14">
         {/* Header */}
-        <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
+        <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b bg-background px-4 sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
           <div className="flex items-center gap-2">
             <Shield className="h-7 w-7 text-primary" />
             <h1 className="text-lg tracking-wider">Code Name</h1>
@@ -126,9 +125,9 @@ export default function UserDashboardLayout({
         </header>
 
         {/* Main Content */}
-        <main className="flex-1 space-y-4 p-4 sm:px-6 sm:pt-0 md:space-y-8 pb-28 sm:pb-24">
+        <main className="flex-1 space-y-4 p-4 pb-20 sm:px-6 sm:pt-0 md:space-y-8">
           {/* Sticky Resource Bar */}
-          <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-4 bg-background/80 p-4 backdrop-blur-sm sm:-mx-6 sm:px-6">
+          <div className="sticky top-[56px] sm:top-0 z-10 -mx-4 mb-4 bg-background/80 p-4 backdrop-blur-sm sm:-mx-6 sm:px-6">
               <div className="grid grid-cols-3 gap-4">
                 <Card className="bg-card/50">
                   <CardContent className="p-2 sm:p-4 flex items-center justify-center gap-2 sm:gap-3">
@@ -160,10 +159,8 @@ export default function UserDashboardLayout({
               </div>
           </div>
 
-
           {children}
         </main>
-      </div>
 
       {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm sm:hidden">
