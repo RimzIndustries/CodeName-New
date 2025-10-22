@@ -125,7 +125,7 @@ export default function UserDashboardLayout({
         </header>
 
         {/* Sticky Resource Bar */}
-        <div className="sticky top-[56px] sm:top-0 z-10 -mx-4 border-b bg-background/80 p-4 backdrop-blur-sm sm:-mx-6 sm:px-6">
+        <div className="sticky top-0 z-10 border-b bg-background/80 p-4 backdrop-blur-sm sm:px-6">
             <div className="grid grid-cols-3 gap-4">
               <Card className="bg-card/50">
                 <CardContent className="p-2 sm:p-4 flex items-center justify-center gap-2 sm:gap-3">
@@ -158,12 +158,12 @@ export default function UserDashboardLayout({
         </div>
 
         {/* Main Content */}
-        <main className="flex-1 space-y-4 p-4 pb-20 sm:px-6 sm:pb-6 md:space-y-8">
+        <main className="flex-1 space-y-4 p-4 pb-20 sm:px-6">
           {children}
         </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm sm:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm">
         <div className="grid h-16 grid-cols-5 items-center justify-items-center gap-1 px-1">
             {bottomNavItems.map((item) => {
                 const isActive = pathname === item.href;
