@@ -347,6 +347,49 @@ export default function AllianceAndWorldPage() {
         fetchData();
     }, [toast]);
     
+    // --- Helper Functions ---
+    
+    const getTitleNameForPride = (pride: number) => {
+        if (!titles || titles.length === 0) return 'Tanpa Gelar';
+        const achievedTitle = [...titles].reverse().find(t => pride >= t.prideRequired);
+        return achievedTitle ? achievedTitle.name : 'Tanpa Gelar';
+    };
+
+    const getMemberJabatan = (member: AllianceMember) => {
+        if (!member) return null;
+        const title = getTitleNameForPride(member.pride);
+        return (
+            <>
+                <span className="text-primary">{title}</span>{' '}
+                <span className="text-primary">{member.province}</span>
+            </>
+        );
+    };
+    
+    const getFullMemberName = (member: AllianceMember) => {
+        if (!member) return null;
+        const title = getTitleNameForPride(member.pride);
+        return (
+            <>
+                {member.prideName}{' '}
+                <span className="text-sm text-muted-foreground">({title} - {member.province})</span>
+            </>
+        );
+    }
+    
+    const getFullMemberNameString = (member: AllianceMember) => {
+        if (!member) return '';
+        const title = getTitleNameForPride(member.pride);
+        return `${member.prideName} (${title} - {member.province})`;
+    }
+
+    const renderSortArrow = (key: AllianceSortKey | PlayerSortKey, type: 'alliance' | 'player') => {
+        const currentKey = type === 'alliance' ? allianceSortKey : playerSortKey;
+        const currentDirection = type === 'alliance' ? allianceSortDirection : playerSortDirection;
+        if (currentKey !== key) return null;
+        return currentDirection === 'asc' ? '▲' : '▼';
+    };
+
     // --- Memoized Calculations & Derived State ---
 
     const voteCounts = useMemo(() => {
@@ -417,50 +460,6 @@ export default function AllianceAndWorldPage() {
             return b.pride - a.pride;
         });
     }, [allPlayers, playerSortKey, playerSortDirection]);
-
-
-    // --- Helper Functions ---
-    
-    const getTitleNameForPride = (pride: number) => {
-        if (!titles || titles.length === 0) return 'Tanpa Gelar';
-        const achievedTitle = [...titles].reverse().find(t => pride >= t.prideRequired);
-        return achievedTitle ? achievedTitle.name : 'Tanpa Gelar';
-    };
-
-    const getMemberJabatan = (member: AllianceMember) => {
-        if (!member) return null;
-        const title = getTitleNameForPride(member.pride);
-        return (
-            <>
-                <span className="text-primary">{title}</span>{' '}
-                <span className="text-primary">{member.province}</span>
-            </>
-        );
-    };
-    
-    const getFullMemberName = (member: AllianceMember) => {
-        if (!member) return null;
-        const title = getTitleNameForPride(member.pride);
-        return (
-            <>
-                {member.prideName}{' '}
-                <span className="text-sm text-muted-foreground">({title} - {member.province})</span>
-            </>
-        );
-    }
-    
-    const getFullMemberNameString = (member: AllianceMember) => {
-        if (!member) return '';
-        const title = getTitleNameForPride(member.pride);
-        return `${member.prideName} (${title} - ${member.province})`;
-    }
-
-    const renderSortArrow = (key: AllianceSortKey | PlayerSortKey, type: 'alliance' | 'player') => {
-        const currentKey = type === 'alliance' ? allianceSortKey : playerSortKey;
-        const currentDirection = type === 'alliance' ? allianceSortDirection : playerSortDirection;
-        if (currentKey !== key) return null;
-        return currentDirection === 'asc' ? '▲' : '▼';
-    };
 
 
     // --- Event Handlers ---
