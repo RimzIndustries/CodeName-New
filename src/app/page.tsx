@@ -3,9 +3,10 @@
 
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Crown, Building2, Swords, Users, ShieldCheck, User, Globe } from 'lucide-react';
+import { Crown, Building2, Swords, Users, ShieldCheck, User, Globe, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ModeToggle } from '@/components/theme-toggle';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function PublicHomePage() {
 
@@ -63,16 +64,17 @@ export default function PublicHomePage() {
             </div>
         </section>
         
-        {/* Features Section */}
+        {/* Tabs Section */}
         <section className="w-full py-12 md:py-24">
-            <div className="container px-4 md:px-6">
-                <div className="flex flex-col items-center justify-center space-y-4 text-center mb-12">
-                     <h2 className="text-2xl tracking-tighter sm:text-4xl font-headline text-primary">Tiga Pilar Kekuasaan</h2>
-                     <p className="max-w-[900px] text-muted-foreground md:text-lg/relaxed lg:text-base/relaxed xl:text-lg/relaxed">
-                        Kuasai tiga aspek fundamental untuk menjadi penguasa terhebat di negeri ini.
-                     </p>
-                </div>
-                <div className="mx-auto grid items-start gap-8 sm:max-w-4xl sm:grid-cols-2 md:gap-12 lg:max-w-5xl lg:grid-cols-3">
+          <div className="container px-4 md:px-6">
+            <Tabs defaultValue="features" className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="features">Fitur Utama</TabsTrigger>
+                <TabsTrigger value="world">Dunia Permainan</TabsTrigger>
+                <TabsTrigger value="about">Tentang</TabsTrigger>
+              </TabsList>
+              <TabsContent value="features">
+                <div className="mx-auto grid items-start gap-8 sm:max-w-4xl sm:grid-cols-2 md:gap-12 lg:max-w-5xl lg:grid-cols-3 pt-8">
                     <Card>
                         <CardHeader className="flex flex-row items-center gap-4">
                              <Building2 className="w-8 h-8 text-primary" />
@@ -101,18 +103,8 @@ export default function PublicHomePage() {
                         </CardContent>
                     </Card>
                 </div>
-            </div>
-        </section>
-
-        {/* Stats Section */}
-        <section className="w-full py-12 md:py-24 bg-muted/20">
-            <div className="container px-4 md:px-6">
-                <div className="flex flex-col items-center justify-center space-y-4 text-center">
-                     <h2 className="text-2xl tracking-tighter sm:text-4xl font-headline text-primary">Dunia yang Hidup</h2>
-                     <p className="max-w-[900px] text-muted-foreground md:text-lg/relaxed lg:text-base/relaxed xl:text-lg/relaxed">
-                        Peta kekuasaan terus berubah. Bergabunglah dengan ribuan pemain lain.
-                     </p>
-                </div>
+              </TabsContent>
+              <TabsContent value="world">
                 <div className="mx-auto grid max-w-5xl grid-cols-1 sm:grid-cols-3 gap-6 py-12">
                      <Card>
                         <CardContent className="p-6 flex flex-col items-center justify-center gap-2">
@@ -136,7 +128,22 @@ export default function PublicHomePage() {
                         </CardContent>
                      </Card>
                 </div>
-            </div>
+              </TabsContent>
+              <TabsContent value="about">
+                <Card className="mt-8">
+                    <CardHeader className="flex flex-row items-center gap-4">
+                        <Info className="w-8 h-8 text-primary" />
+                        <CardTitle>Tentang Code Name</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <p className="text-sm text-muted-foreground">
+                            Code Name adalah permainan strategi multipemain berbasis teks yang menantang Anda untuk berpikir taktis. Bangun kerajaan dari awal, kelola ekonomi dengan bijak, dan latih pasukan untuk menaklukkan wilayah baru. Bentuk aliansi yang kuat dengan pemain lain, karena kerja sama adalah kunci untuk bertahan hidup dan mendominasi dunia yang terus berubah ini. Setiap keputusan Anda akan menentukan nasib kerajaan Anda.
+                        </p>
+                    </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          </div>
         </section>
 
       </main>
