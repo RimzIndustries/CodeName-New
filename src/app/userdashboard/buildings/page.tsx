@@ -1,7 +1,7 @@
 
 'use client';
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,35 +14,22 @@ import { db } from '@/lib/firebase';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
 import { differenceInSeconds } from 'date-fns';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
+
+// --- Building-related Interfaces and Constants ---
 interface BuildingCosts {
-    residence: number;
-    farm: number;
-    fort: number;
-    university: number;
-    barracks: number;
-    mobility: number;
-    tambang: number;
+    residence: number; farm: number; fort: number; university: number;
+    barracks: number; mobility: number; tambang: number;
 }
 interface BuildingCounts {
-    residence: number;
-    farm: number;
-    fort: number;
-    university: number;
-    barracks: number;
-    mobility: number;
-    tambang: number;
+    residence: number; farm: number; fort: number; university: number;
+    barracks: number; mobility: number; tambang: number;
 }
-
 interface ConstructionJob {
-    id: string;
-    buildingId: keyof BuildingCounts;
-    amount: number;
-    completionTime: Timestamp;
+    id: string; buildingId: keyof BuildingCounts; amount: number; completionTime: Timestamp;
 }
-
 const defaultBuildingCosts: BuildingCosts = { residence: 1000, farm: 1200, fort: 2500, university: 5000, barracks: 1500, mobility: 1000, tambang: 2000 };
-
 const buildingDefinitions = [
   { id: 'residence', name: 'Rumah', description: 'Menambah kapasitas dan menghasilkan pengangguran.' },
   { id: 'farm', name: 'Sawah', description: 'Menghasilkan makanan dan pengangguran.' },
@@ -52,16 +39,34 @@ const buildingDefinitions = [
   { id: 'mobility', name: 'Mobilitas Pasukan', description: 'Meningkatkan bonus serangan dan menghasilkan pengangguran.' },
   { id: 'tambang', name: 'Tambang', description: 'Menghasilkan uang dan menghasilkan pengangguran.' },
 ];
-
 const buildingNameMap: { [key: string]: string } = {
-  residence: 'Rumah',
-  farm: 'Sawah',
-  fort: 'Benteng',
-  university: 'Kampus',
-  barracks: 'Barak Pasukan',
-  mobility: 'Mobilitas Pasukan',
-  tambang: 'Tambang'
+  residence: 'Rumah', farm: 'Sawah', fort: 'Benteng', university: 'Kampus',
+  barracks: 'Barak Pasukan', mobility: 'Mobilitas Pasukan', tambang: 'Tambang'
 };
+
+// --- Barracks-related Interfaces and Constants ---
+interface UnitCosts {
+    attack: number; defense: number; elite: number; raider: number; spy: number;
+}
+interface UnitCounts {
+    attack: number; defense: number; elite: number; raider: number; spy: number;
+}
+interface TrainingJob {
+    id: string; userId: string; unitId: keyof UnitCounts; amount: number; completionTime: Timestamp;
+}
+const defaultUnitCosts: UnitCosts = { attack: 350, defense: 350, elite: 950, raider: 500, spy: 700 };
+const unitDefinitions = [
+  { id: 'attack', name: 'Pasukan Serang', stats: '(10/0)' },
+  { id: 'defense', name: 'Pasukan Bertahan', stats: '(0/10)' },
+  { id: 'elite', name: 'Pasukan Elit', stats: '(13/5)' },
+  { id: 'raider', name: 'Perampok', stats: '(0/0)' },
+  { id: 'spy', name: 'Mata-mata', stats: '(Intelligent)' },
+];
+const unitNameMap: { [key: string]: string } = {
+  attack: 'Pasukan Serang', defense: 'Pasukan Bertahan', elite: 'Pasukan Elit',
+  raider: 'Perampok', spy: 'Mata-mata'
+};
+
 
 function Countdown({ completionTime }: { completionTime: Timestamp }) {
     const [timeLeft, setTimeLeft] = useState('');
@@ -89,41 +94,59 @@ function Countdown({ completionTime }: { completionTime: Timestamp }) {
     return <span>{timeLeft}</span>;
 }
 
-export default function BuildingsPage() {
+export default function ConstructionAndTrainingPage() {
   const { user, userProfile } = useAuth();
   const { toast } = useToast();
+  
+  // Settings state
   const [buildingCosts, setBuildingCosts] = useState<BuildingCosts>(defaultBuildingCosts);
-  const [constructionTime, setConstructionTime] = useState(5); // default 5 hours
-  const [constructionBonus, setConstructionBonus] = useState(5); // default 5%
-  const [order, setOrder] = useState<{ [key: string]: number }>({});
+  const [unitCosts, setUnitCosts] = useState<UnitCosts>(defaultUnitCosts);
+  const [constructionTime, setConstructionTime] = useState(5);
+  const [trainingTime, setTrainingTime] = useState(2);
+  const [constructionBonus, setConstructionBonus] = useState(5);
+  const [barracksBonus, setBarracksBonus] = useState(50);
+  
+  // Building state
+  const [buildOrder, setBuildOrder] = useState<{ [key: string]: number }>({});
   const [demolishOrder, setDemolishOrder] = useState<{ [key: string]: number }>({});
-  const [isLoading, setIsLoading] = useState(false);
+  const [isBuilding, setIsBuilding] = useState(false);
   const [isDemolishing, setIsDemolishing] = useState(false);
   const [isDemolishDialogOpen, setIsDemolishDialogOpen] = useState(false);
   const [constructionQueue, setConstructionQueue] = useState<ConstructionJob[]>([]);
-  const [isLoadingQueue, setIsLoadingQueue] = useState(true);
+  const [isLoadingConstructionQueue, setIsLoadingConstructionQueue] = useState(true);
+  
+  // Barracks state
+  const [trainOrder, setTrainOrder] = useState<{ [key: string]: number }>({});
+  const [dismissOrder, setDismissOrder] = useState<{ [key: string]: number }>({});
+  const [isTraining, setIsTraining] = useState(false);
+  const [isDismissing, setIsDismissing] = useState(false);
+  const [isDismissDialogOpen, setIsDismissDialogOpen] = useState(false);
+  const [trainingQueue, setTrainingQueue] = useState<TrainingJob[]>([]);
+  const [isLoadingTrainingQueue, setIsLoadingTrainingQueue] = useState(true);
   
   useEffect(() => {
     const fetchGameSettings = async () => {
         const costsDocRef = doc(db, 'game-settings', 'game-costs');
-        const costsDocSnap = await getDoc(costsDocRef);
-        if (costsDocSnap.exists() && costsDocSnap.data().buildings) {
-            setBuildingCosts(costsDocSnap.data().buildings);
-        }
-
         const timingDocRef = doc(db, 'game-settings', 'timing-rules');
-        const timingDocSnap = await getDoc(timingDocRef);
-        if (timingDocSnap.exists()) {
-            const data = timingDocSnap.data();
-            if (data.constructionTimeInHours !== undefined) {
-                setConstructionTime(data.constructionTimeInHours);
-            }
-        }
-        
         const effectsDocRef = doc(db, 'game-settings', 'building-effects');
-        const effectsDocSnap = await getDoc(effectsDocRef);
-        if (effectsDocSnap.exists() && effectsDocSnap.data().university) {
-            setConstructionBonus(effectsDocSnap.data().university.constructionBonus ?? 5);
+
+        const [costsSnap, timingSnap, effectsSnap] = await Promise.all([
+          getDoc(costsDocRef), getDoc(timingDocRef), getDoc(effectsDocRef)
+        ]);
+
+        if (costsSnap.exists()) {
+            if (costsSnap.data().buildings) setBuildingCosts(costsSnap.data().buildings);
+            if (costsSnap.data().units) setUnitCosts(costsSnap.data().units);
+        }
+        if (timingSnap.exists()) {
+            const data = timingSnap.data();
+            if (data.constructionTimeInHours !== undefined) setConstructionTime(data.constructionTimeInHours);
+            if (data.trainingTimeInHours !== undefined) setTrainingTime(data.trainingTimeInHours);
+        }
+        if (effectsSnap.exists()) {
+            const data = effectsSnap.data();
+            if (data.university) setConstructionBonus(data.university.constructionBonus ?? 5);
+            if (data.barracks) setBarracksBonus(data.barracks.trainingBonus ?? 50);
         }
     };
     fetchGameSettings();
@@ -131,101 +154,93 @@ export default function BuildingsPage() {
 
   useEffect(() => {
     if (!user) return;
-    setIsLoadingQueue(true);
+    setIsLoadingConstructionQueue(true);
     const q = query(collection(db, 'constructionQueue'), where('userId', '==', user.uid));
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const jobs = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        } as ConstructionJob));
+        const jobs = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ConstructionJob));
         jobs.sort((a,b) => a.completionTime.toMillis() - b.completionTime.toMillis());
         setConstructionQueue(jobs);
-        setIsLoadingQueue(false);
-    }, (error) => {
-        console.error("Error fetching construction queue:", error);
-        toast({ title: "Gagal memuat antrian", variant: "destructive" });
-        setIsLoadingQueue(false);
+        setIsLoadingConstructionQueue(false);
     });
-
     return () => unsubscribe();
-  }, [user, toast]);
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    setIsLoadingTrainingQueue(true);
+    const q = query(collection(db, 'trainingQueue'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+        const jobs = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TrainingJob));
+        jobs.sort((a, b) => a.completionTime.toMillis() - b.completionTime.toMillis());
+        setTrainingQueue(jobs);
+        setIsLoadingTrainingQueue(false);
+    });
+    return () => unsubscribe();
+  }, [user]);
 
 
-  const ownedBuildings = useMemo(() => {
-    return userProfile?.buildings ?? { residence: 0, farm: 0, fort: 0, university: 0, barracks: 0, mobility: 0, tambang: 0 };
-  }, [userProfile?.buildings]);
+  const ownedBuildings = useMemo(() => userProfile?.buildings ?? {}, [userProfile?.buildings]);
+  const ownedUnits = useMemo(() => userProfile?.units ?? {}, [userProfile?.units]);
   
-  const landUsedByOwned = useMemo(() => {
-    return Object.values(ownedBuildings).reduce((acc, count) => acc + count, 0);
-  }, [ownedBuildings]);
-
-  const landUsedByQueue = useMemo(() => {
-    return constructionQueue.reduce((acc, job) => acc + job.amount, 0);
-  }, [constructionQueue]);
-  
+  const landUsedByOwned = useMemo(() => Object.values(ownedBuildings).reduce((acc, count) => acc + count, 0), [ownedBuildings]);
+  const landUsedByQueue = useMemo(() => constructionQueue.reduce((acc, job) => acc + job.amount, 0), [constructionQueue]);
   const landUsed = landUsedByOwned + landUsedByQueue;
   const landAvailable = userProfile?.land ?? 0;
   const landRemaining = landAvailable - landUsed;
 
-  const handleOrderChange = (buildingId: string, value: string) => {
+  const handleBuildOrderChange = (buildingId: string, value: string) => {
       const amount = Number(value);
-      if (!isNaN(amount) && amount >= 0) {
-          setOrder(prev => ({...prev, [buildingId]: amount}));
-      }
+      if (!isNaN(amount) && amount >= 0) setBuildOrder(prev => ({...prev, [buildingId]: amount}));
   };
 
   const handleDemolishOrderChange = (buildingId: string, value: string) => {
     const amount = Number(value);
-    if (!isNaN(amount) && amount >= 0) {
-        setDemolishOrder(prev => ({ ...prev, [buildingId]: amount }));
-    }
+    if (!isNaN(amount) && amount >= 0) setDemolishOrder(prev => ({ ...prev, [buildingId]: amount }));
+  };
+  
+  const handleTrainOrderChange = (unitId: string, value: string) => {
+    const amount = Number(value);
+    if (!isNaN(amount) && amount >= 0) setTrainOrder(prev => ({ ...prev, [unitId]: amount }));
+  };
+
+  const handleDismissOrderChange = (unitId: string, value: string) => {
+    const amount = Number(value);
+    if (!isNaN(amount) && amount >= 0) setDismissOrder(prev => ({ ...prev, [unitId]: amount }));
+  };
+
+  const handleSetMaxTrain = (unitId: string) => {
+    if (!userProfile) return;
+    const costPerUnit = unitCosts[unitId as keyof UnitCosts];
+    const maxFromMoney = costPerUnit > 0 ? Math.floor((userProfile.money ?? 0) / costPerUnit) : Infinity;
+    const maxFromPopulation = userProfile.unemployed ?? 0;
+    setTrainOrder(prev => ({ ...prev, [unitId]: Math.min(maxFromMoney, maxFromPopulation) }));
   };
 
   const handleOrderConstruction = async () => {
     if (!user || !userProfile) return;
-    setIsLoading(true);
+    setIsBuilding(true);
 
-    let totalCost = 0;
-    let totalBuildingsOrdered = 0;
-    let orderSummary = '';
-
-    for (const buildingId in order) {
-        const amount = order[buildingId];
+    let totalCost = 0, totalBuildingsOrdered = 0, orderSummary = '';
+    for (const buildingId in buildOrder) {
+        const amount = buildOrder[buildingId];
         if (amount > 0) {
-            const costPerUnit = buildingCosts[buildingId as keyof BuildingCosts] ?? 0;
-            
-            if (isNaN(costPerUnit) || costPerUnit < 0) {
-                console.error(`Invalid cost for ${buildingId}:`, costPerUnit);
-                toast({
-                    title: "Gagal Membangun",
-                    description: `Ada kesalahan konfigurasi biaya untuk bangunan ini. Harap hubungi admin.`,
-                    variant: "destructive"
-                });
-                setIsLoading(false);
-                return;
-            }
-            totalCost += (amount * costPerUnit);
+            totalCost += amount * (buildingCosts[buildingId as keyof BuildingCosts] ?? 0);
             totalBuildingsOrdered += amount;
             orderSummary += `${amount.toLocaleString()} ${buildingNameMap[buildingId] || buildingId}, `;
         }
     }
 
     if (totalBuildingsOrdered === 0) {
-        toast({ title: "Tidak ada pesanan", description: "Silakan masukkan jumlah bangunan yang ingin Anda bangun." });
-        setIsLoading(false);
-        return;
+        toast({ title: "Tidak ada pesanan." });
+        setIsBuilding(false); return;
     }
-    
     if ((userProfile.money ?? 0) < totalCost) {
-        toast({ title: "Uang tidak cukup", description: `Anda membutuhkan ${totalCost.toLocaleString()} uFtB.`, variant: "destructive" });
-        setIsLoading(false);
-        return;
+        toast({ title: "Uang tidak cukup.", variant: "destructive" });
+        setIsBuilding(false); return;
     }
-
     if (landRemaining < totalBuildingsOrdered) {
-        toast({ title: "Tanah tidak cukup", description: `Anda hanya memiliki ${landRemaining.toLocaleString()} tanah tersisa.`, variant: "destructive" });
-        setIsLoading(false);
-        return;
+        toast({ title: "Tanah tidak cukup.", variant: "destructive" });
+        setIsBuilding(false); return;
     }
 
     try {
@@ -237,212 +252,279 @@ export default function BuildingsPage() {
         const timeMultiplier = Math.max(0.1, 1 - (totalBonusPercent / 100));
         const durationPerJobInMs = constructionTime * timeMultiplier * 60 * 60 * 1000;
 
-        for (const buildingId in order) {
-            const amount = order[buildingId];
-            if (amount > 0) {
+        for (const buildingId in buildOrder) {
+            if (buildOrder[buildingId] > 0) {
                 const jobCompletionTime = new Date(Date.now() + durationPerJobInMs);
-                
                 const jobRef = doc(collection(db, 'constructionQueue'));
-                batch.set(jobRef, {
-                    userId: user.uid,
-                    buildingId,
-                    amount: amount,
-                    completionTime: Timestamp.fromDate(jobCompletionTime),
-                });
+                batch.set(jobRef, { userId: user.uid, buildingId, amount: buildOrder[buildingId], completionTime: Timestamp.fromDate(jobCompletionTime) });
             }
         }
 
-        // Add to activity log
         const logRef = doc(collection(db, "activityLog"));
-        batch.set(logRef, {
-            userId: user.uid,
-            prideName: userProfile.prideName,
-            type: "build",
-            message: `Memulai konstruksi: ${orderSummary.slice(0, -2)}.`,
-            timestamp: serverTimestamp(),
-        });
-
+        batch.set(logRef, { userId: user.uid, prideName: userProfile.prideName, type: "build", message: `Memulai konstruksi: ${orderSummary.slice(0, -2)}.`, timestamp: serverTimestamp() });
+        
         await batch.commit();
-        toast({ title: "Ditambahkan ke Antrian Konstruksi", description: "Bangunan Anda sedang dibangun dan akan selesai sesuai waktu yang ditentukan." });
-        setOrder({});
+        toast({ title: "Ditambahkan ke Antrian Konstruksi" });
+        setBuildOrder({});
     } catch (error) {
         console.error("Error ordering construction:", error);
         toast({ title: "Gagal memulai konstruksi", variant: "destructive" });
     } finally {
-        setIsLoading(false);
+        setIsBuilding(false);
     }
   };
 
   const handleDemolish = async () => {
-    if (!user || !userProfile) return;
+    if (!user) return;
     setIsDemolishing(true);
-
     const batch = writeBatch(db);
     const userDocRef = doc(db, 'users', user.uid);
     let totalDemolished = 0;
-    let isValid = true;
-
+    
     for (const buildingId in demolishOrder) {
         const amount = demolishOrder[buildingId];
         if (amount > 0) {
-            const owned = ownedBuildings[buildingId as keyof BuildingCounts] ?? 0;
-            if (amount > owned) {
-                toast({ title: "Jumlah tidak valid", description: `Anda tidak dapat menghancurkan lebih banyak ${buildingNameMap[buildingId]} daripada yang Anda miliki.`, variant: "destructive" });
-                isValid = false;
-                break;
+            if (amount > (ownedBuildings[buildingId as keyof BuildingCounts] ?? 0)) {
+                toast({ title: "Jumlah tidak valid", variant: "destructive" });
+                setIsDemolishing(false); return;
             }
             batch.update(userDocRef, { [`buildings.${buildingId}`]: increment(-amount) });
             totalDemolished += amount;
         }
     }
-
-    if (!isValid) {
-        setIsDemolishing(false);
-        return;
-    }
-
+    
     if (totalDemolished === 0) {
-        toast({ title: "Tidak ada pesanan", description: "Masukkan jumlah bangunan yang akan dihancurkan." });
-        setIsDemolishing(false);
-        return;
+        toast({ title: "Tidak ada pesanan." });
+        setIsDemolishing(false); return;
     }
 
     try {
         await batch.commit();
-        toast({ title: "Bangunan Dihancurkan", description: `Sebanyak ${totalDemolished} bangunan telah berhasil dihancurkan.` });
+        toast({ title: "Bangunan Dihancurkan" });
         setDemolishOrder({});
         setIsDemolishDialogOpen(false);
     } catch (error) {
-        console.error("Error demolishing buildings:", error);
-        toast({ title: "Gagal menghancurkan bangunan", variant: "destructive" });
+        toast({ title: "Gagal menghancurkan", variant: "destructive" });
     } finally {
         setIsDemolishing(false);
+    }
+  };
+  
+  const handleTrainTroops = async () => {
+    if (!user || !userProfile) return;
+    setIsTraining(true);
+
+    let totalCost = 0, totalUnemployedNeeded = 0, orderCount = 0, orderSummary = '';
+    for (const unitId in trainOrder) {
+        const amount = trainOrder[unitId];
+        if (amount > 0) {
+            totalCost += amount * (unitCosts[unitId as keyof UnitCosts] ?? 0);
+            totalUnemployedNeeded += amount;
+            orderCount++;
+            orderSummary += `${amount.toLocaleString()} ${unitNameMap[unitId] || unitId}, `;
+        }
+    }
+
+    if (orderCount === 0) {
+        toast({ title: "Tidak ada pesanan." });
+        setIsTraining(false); return;
+    }
+    if ((userProfile.money ?? 0) < totalCost) {
+        toast({ title: "Uang tidak cukup.", variant: "destructive" });
+        setIsTraining(false); return;
+    }
+    if ((userProfile.unemployed ?? 0) < totalUnemployedNeeded) {
+        toast({ title: "Pengangguran tidak cukup.", variant: "destructive" });
+        setIsTraining(false); return;
+    }
+
+    try {
+        const batch = writeBatch(db);
+        const userDocRef = doc(db, 'users', user.uid);
+        batch.update(userDocRef, { money: increment(-totalCost), unemployed: increment(-totalUnemployedNeeded) });
+        
+        const totalBonusPercent = (userProfile.buildings?.barracks ?? 0) * barracksBonus;
+        const timeMultiplier = Math.max(0.1, 1 - (totalBonusPercent / 100));
+        const durationPerJobInMs = trainingTime * timeMultiplier * 60 * 60 * 1000;
+
+        let lastCompletionTime = new Date();
+        if (trainingQueue.length > 0) lastCompletionTime = trainingQueue[trainingQueue.length - 1].completionTime.toDate();
+
+        for (const unitId in trainOrder) {
+            if (trainOrder[unitId] > 0) {
+                const jobStartTime = lastCompletionTime > new Date() ? lastCompletionTime : new Date();
+                const jobCompletionTime = new Date(jobStartTime.getTime() + durationPerJobInMs);
+                lastCompletionTime = jobCompletionTime;
+
+                const jobRef = doc(collection(db, 'trainingQueue'));
+                batch.set(jobRef, { userId: user.uid, unitId, amount: trainOrder[unitId], completionTime: Timestamp.fromDate(jobCompletionTime) });
+            }
+        }
+        
+        const logRef = doc(collection(db, "activityLog"));
+        batch.set(logRef, { userId: user.uid, prideName: userProfile.prideName, type: "train", message: `Memulai pelatihan: ${orderSummary.slice(0, -2)}.`, timestamp: serverTimestamp() });
+        
+        await batch.commit();
+        toast({ title: "Pasukan Ditambahkan ke Antrian" });
+        setTrainOrder({});
+    } catch (error) {
+        toast({ title: "Gagal melatih", variant: "destructive" });
+    } finally {
+        setIsTraining(false);
+    }
+  };
+
+  const handleDismissTroops = async () => {
+    if (!user) return;
+    setIsDismissing(true);
+    let totalDismissed = 0;
+    const updates: { [key: string]: any } = {};
+
+    for (const unitId in dismissOrder) {
+        const amount = dismissOrder[unitId];
+        if (amount > 0) {
+            if (amount > (ownedUnits[unitId as keyof UnitCounts] ?? 0)) {
+                toast({ title: "Jumlah tidak valid.", variant: "destructive" });
+                setIsDismissing(false); return;
+            }
+            updates[`units.${unitId}`] = increment(-amount);
+            totalDismissed += amount;
+        }
+    }
+
+    if (totalDismissed === 0) {
+        toast({ title: "Tidak ada pesanan." });
+        setIsDismissing(false); return;
+    }
+    updates.unemployed = increment(totalDismissed);
+
+    try {
+        await updateDoc(doc(db, 'users', user.uid), updates);
+        toast({ title: "Pasukan Dipecat" });
+        setDismissOrder({});
+        setIsDismissDialogOpen(false);
+    } catch (error) {
+        toast({ title: "Gagal memecat", variant: "destructive" });
+    } finally {
+        setIsDismissing(false);
     }
   };
 
   return (
     <Card>
       <CardHeader className="text-center p-4">
-        <CardTitle className="text-xl">Bangunan</CardTitle>
+        <CardTitle className="text-xl">Konstruksi & Pelatihan</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6 p-4">
-        <Card className="bg-card/50">
-          <CardContent className="p-4 text-sm space-y-1">
-            <div className="flex justify-between"><span>Total Tanah:</span> <span>{(landAvailable).toLocaleString()}</span></div>
-            <div className="flex justify-between"><span>Tanah Terpakai (Dimiliki + Antrian):</span> <span>{landUsed.toLocaleString()}</span></div>
-            <div className="flex justify-between"><span>Tanah Tersedia untuk Dibangun:</span> <span className={landRemaining < 0 ? 'text-destructive' : ''}>{landRemaining.toLocaleString()}</span></div>
-          </CardContent>
-        </Card>
+        <Tabs defaultValue="buildings">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="buildings">Bangunan</TabsTrigger>
+            <TabsTrigger value="troops">Pasukan</TabsTrigger>
+          </TabsList>
+          
+          {/* Buildings Tab */}
+          <TabsContent value="buildings" className="space-y-6">
+            <Card className="bg-card/50">
+              <CardContent className="p-4 text-sm space-y-1">
+                <div className="flex justify-between"><span>Total Tanah:</span> <span>{landAvailable.toLocaleString()}</span></div>
+                <div className="flex justify-between"><span>Tanah Terpakai (Dimiliki + Antrian):</span> <span>{landUsed.toLocaleString()}</span></div>
+                <div className="flex justify-between"><span>Tanah Tersedia:</span> <span className={landRemaining < 0 ? 'text-destructive' : ''}>{landRemaining.toLocaleString()}</span></div>
+              </CardContent>
+            </Card>
 
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="whitespace-nowrap">Nama Bangunan</TableHead>
-                <TableHead className="text-right">Dimiliki</TableHead>
-                <TableHead className="text-right whitespace-nowrap">Harga/Bangunan</TableHead>
-                <TableHead className="text-center w-[100px]">Pesan</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {buildingDefinitions.map((building) => {
-                const owned = ownedBuildings?.[building.id as keyof BuildingCounts] ?? 0;
-                return (
-                  <TableRow key={building.id}>
-                    <TableCell>{building.name}</TableCell>
-                    <TableCell className="text-right">{owned.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{(buildingCosts[building.id as keyof BuildingCosts] ?? 0).toLocaleString()} uFtB</TableCell>
-                    <TableCell>
-                      <Input 
-                        type="number" 
-                        placeholder="0"
-                        value={order[building.id] || ''}
-                        onChange={(e) => handleOrderChange(building.id, e.target.value)}
-                        className="h-8 w-20 text-center bg-input/50 mx-auto"
-                        min="0"
-                      />
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-        
-        <div className="space-y-4 pt-4">
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Button className="w-full bg-accent text-accent-foreground hover:bg-accent/90" onClick={handleOrderConstruction} disabled={isLoading}>
-                {isLoading ? 'Mengirim ke Antrian...' : 'Pesan Konstruksi'}
-            </Button>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader><TableRow><TableHead>Bangunan</TableHead><TableHead className="text-right">Dimiliki</TableHead><TableHead className="text-right">Harga</TableHead><TableHead className="text-center w-[100px]">Pesan</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {buildingDefinitions.map((b) => (
+                    <TableRow key={b.id}>
+                      <TableCell>{b.name}</TableCell>
+                      <TableCell className="text-right">{(ownedBuildings[b.id as keyof BuildingCounts] ?? 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{(buildingCosts[b.id as keyof BuildingCosts] ?? 0).toLocaleString()} uFtB</TableCell>
+                      <TableCell><Input type="number" placeholder="0" value={buildOrder[b.id] || ''} onChange={(e) => handleBuildOrderChange(b.id, e.target.value)} className="h-8 w-20 text-center bg-input/50 mx-auto" min="0" /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
             
-            <Dialog open={isDemolishDialogOpen} onOpenChange={setIsDemolishDialogOpen}>
-                <DialogTrigger asChild>
-                    <Button variant="destructive" className="w-full">Hancurkan Bangunan</Button>
-                </DialogTrigger>
+            <div className="flex flex-col sm:flex-row gap-2 pt-4">
+              <Button className="w-full bg-accent text-accent-foreground hover:bg-accent/90" onClick={handleOrderConstruction} disabled={isBuilding}>{isBuilding ? 'Memesan...' : 'Pesan Konstruksi'}</Button>
+              <Dialog open={isDemolishDialogOpen} onOpenChange={setIsDemolishDialogOpen}>
+                  <DialogTrigger asChild><Button variant="destructive" className="w-full">Hancurkan</Button></DialogTrigger>
+                  <DialogContent>
+                      <DialogHeader><DialogTitle>Hancurkan Bangunan</DialogTitle><DialogDescription>Tindakan ini instan.</DialogDescription></DialogHeader>
+                      <div className="space-y-4 py-4">
+                          {buildingDefinitions.map(b => (<div key={b.id} className="flex items-center justify-between"><Label htmlFor={`demolish-${b.id}`}>{b.name} (Dimiliki: {ownedBuildings[b.id as keyof BuildingCounts]?.toLocaleString() ?? 0})</Label><Input id={`demolish-${b.id}`} type="number" placeholder="0" value={demolishOrder[b.id] || ''} onChange={(e) => handleDemolishOrderChange(b.id, e.target.value)} className="h-8 w-24 text-center" min="0" max={ownedBuildings[b.id as keyof BuildingCounts] ?? 0}/></div>))}
+                      </div>
+                      <DialogFooter><Button variant="ghost" onClick={() => setIsDemolishDialogOpen(false)}>Batal</Button><Button variant="destructive" onClick={handleDemolish} disabled={isDemolishing}>{isDemolishing ? "Menghancurkan..." : "Hancurkan"}</Button></DialogFooter>
+                  </DialogContent>
+              </Dialog>
+            </div>
+            
+            <Separator />
+            <div>
+              <h3 className="text-lg mb-2 text-center">Antrian Konstruksi</h3>
+              {isLoadingConstructionQueue ? <p className="text-center text-sm">Memuat...</p> : constructionQueue.length > 0 ? (
+                  <Table><TableHeader><TableRow><TableHead>Bangunan</TableHead><TableHead className="text-right">Jumlah</TableHead><TableHead className="text-right">Selesai Dalam</TableHead></TableRow></TableHeader>
+                    <TableBody>{constructionQueue.map(job => (<TableRow key={job.id}><TableCell>{buildingNameMap[job.buildingId]}</TableCell><TableCell className="text-right">{job.amount.toLocaleString()}</TableCell><TableCell className="text-right"><Countdown completionTime={job.completionTime} /></TableCell></TableRow>))}</TableBody>
+                  </Table>
+              ) : <p className="text-center text-sm">Tidak ada konstruksi berjalan.</p>}
+            </div>
+          </TabsContent>
+
+          {/* Troops Tab */}
+          <TabsContent value="troops" className="space-y-6">
+            <Card className="bg-card/50">
+              <CardContent className="p-4 text-sm"><div className="flex justify-between"><span>Pengangguran Tersedia:</span> <span>{(userProfile?.unemployed ?? 0).toLocaleString()}</span></div></CardContent>
+            </Card>
+
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader><TableRow><TableHead>Unit (Serang/Bertahan)</TableHead><TableHead className="text-right">Dimiliki</TableHead><TableHead className="text-right">Biaya</TableHead><TableHead className="text-center w-[150px]">Latih</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {unitDefinitions.map((unit) => (
+                    <TableRow key={unit.id}>
+                      <TableCell>{unit.name} <span className="text-muted-foreground">{unit.stats}</span></TableCell>
+                      <TableCell className="text-right">{(ownedUnits[unit.id as keyof UnitCounts] ?? 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{unitCosts[unit.id as keyof UnitCosts]} uFtB</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2 justify-center">
+                            <Input type="number" value={trainOrder[unit.id] || ''} onChange={(e) => handleTrainOrderChange(unit.id, e.target.value)} placeholder="0" className="h-8 w-16 text-center bg-input/50" min="0"/>
+                            <Button size="sm" variant="outline" className="h-8 bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => handleSetMaxTrain(unit.id)}>Max</Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            
+            <div className="flex flex-col sm:flex-row gap-2 pt-4">
+              <Button className="w-full bg-accent text-accent-foreground hover:bg-accent/90" onClick={handleTrainTroops} disabled={isTraining}>{isTraining ? 'Melatih...' : 'Latih Pasukan'}</Button>
+              <Dialog open={isDismissDialogOpen} onOpenChange={setIsDismissDialogOpen}>
+                <DialogTrigger asChild><Button variant="destructive" className="w-full">Pecat Pasukan</Button></DialogTrigger>
                 <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Hancurkan Bangunan</DialogTitle>
-                        <DialogDescription>
-                            Masukkan jumlah bangunan yang ingin Anda hancurkan. Tindakan ini instan dan tidak dapat diurungkan.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                        {buildingDefinitions.map(b => (
-                            <div key={b.id} className="flex items-center justify-between">
-                                <Label htmlFor={`demolish-${b.id}`}>{b.name} (Dimiliki: {ownedBuildings[b.id as keyof BuildingCounts]?.toLocaleString() ?? 0})</Label>
-                                <Input
-                                    id={`demolish-${b.id}`}
-                                    type="number"
-                                    placeholder="0"
-                                    value={demolishOrder[b.id] || ''}
-                                    onChange={(e) => handleDemolishOrderChange(b.id, e.target.value)}
-                                    className="h-8 w-24 text-center"
-                                    min="0"
-                                    max={ownedBuildings[b.id as keyof BuildingCounts] ?? 0}
-                                />
-                            </div>
-                        ))}
-                    </div>
-                    <DialogFooter>
-                        <Button variant="ghost" onClick={() => setIsDemolishDialogOpen(false)}>Batal</Button>
-                        <Button variant="destructive" onClick={handleDemolish} disabled={isDemolishing}>
-                            {isDemolishing ? "Menghancurkan..." : "Hancurkan"}
-                        </Button>
-                    </DialogFooter>
+                  <DialogHeader><DialogTitle>Pecat Pasukan</DialogTitle><DialogDescription>Tindakan ini instan.</DialogDescription></DialogHeader>
+                  <div className="space-y-4 py-4">
+                      {unitDefinitions.map(unit => (<div key={unit.id} className="flex items-center justify-between"><Label htmlFor={`dismiss-${unit.id}`}>{unit.name} (Dimiliki: {(ownedUnits[unit.id as keyof UnitCounts] ?? 0).toLocaleString()})</Label><Input id={`dismiss-${unit.id}`} type="number" placeholder="0" value={dismissOrder[unit.id] || ''} onChange={(e) => handleDismissOrderChange(unit.id, e.target.value)} className="h-8 w-24 text-center" min="0" max={ownedUnits[unit.id as keyof UnitCounts] ?? 0}/></div>))}
+                  </div>
+                  <DialogFooter><Button variant="ghost" onClick={() => setIsDismissDialogOpen(false)}>Batal</Button><Button variant="destructive" onClick={handleDismissTroops} disabled={isDismissing}>{isDismissing ? 'Memecat...' : 'Pecat'}</Button></DialogFooter>
                 </DialogContent>
-            </Dialog>
-          </div>
-        </div>
-        <Separator />
-        <div>
-            <h3 className="text-lg mb-2 text-center">Antrian Konstruksi</h3>
-            {isLoadingQueue ? (
-                <p className="text-sm text-muted-foreground text-center">Memuat antrian...</p>
-            ) : constructionQueue.length > 0 ? (
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Bangunan</TableHead>
-                            <TableHead className="text-right">Jumlah</TableHead>
-                            <TableHead className="text-right">Selesai Dalam</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {constructionQueue.map(job => (
-                            <TableRow key={job.id}>
-                                <TableCell>{buildingNameMap[job.buildingId]}</TableCell>
-                                <TableCell className="text-right">{job.amount.toLocaleString()}</TableCell>
-                                <TableCell className="text-right">
-                                    <Countdown completionTime={job.completionTime} />
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
+              </Dialog>
+            </div>
+            
+            <Separator />
+            <div>
+              <h3 className="text-lg mb-2 text-center">Antrian Pelatihan</h3>
+              {isLoadingTrainingQueue ? <p className="text-center text-sm">Memuat...</p> : trainingQueue.length > 0 ? (
+                <Table><TableHeader><TableRow><TableHead>Pasukan</TableHead><TableHead className="text-right">Jumlah</TableHead><TableHead className="text-right">Selesai Dalam</TableHead></TableRow></TableHeader>
+                  <TableBody>{trainingQueue.map(job => (<TableRow key={job.id}><TableCell>{unitNameMap[job.unitId]}</TableCell><TableCell className="text-right">{job.amount.toLocaleString()}</TableCell><TableCell className="text-right"><Countdown completionTime={job.completionTime} /></TableCell></TableRow>))}</TableBody>
                 </Table>
-            ) : (
-                <p className="text-sm text-muted-foreground text-center">Tidak ada konstruksi yang sedang berjalan.</p>
-            )}
-        </div>
+              ) : <p className="text-center text-sm">Tidak ada pelatihan berjalan.</p>}
+            </div>
+          </TabsContent>
+        </Tabs>
       </CardContent>
     </Card>
   );

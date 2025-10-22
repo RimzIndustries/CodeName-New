@@ -55,8 +55,7 @@ export default function UserDashboardLayout({
 
   const bottomNavItems = [
     { href: "/userdashboard", icon: BarChart3, label: "Info" },
-    { href: "/userdashboard/buildings", icon: Building2, label: "Bangunan" },
-    { href: "/userdashboard/barracks", icon: Shield, label: "Barak" },
+    { href: "/userdashboard/buildings", icon: Building2, label: "Konstruksi" },
     { href: "/userdashboard/command", icon: Swords, label: "Komando" },
     { href: "/userdashboard/alliance", icon: Users, label: "Aliansi" },
     { href: "/userdashboard/world", icon: Globe, label: "Dunia" },
@@ -165,7 +164,7 @@ export default function UserDashboardLayout({
 
       {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm">
-        <div className="grid h-16 grid-cols-6 items-center justify-items-center gap-1 px-1">
+        <div className="grid h-16 grid-cols-5 items-center justify-items-center gap-1 px-1">
             {bottomNavItems.map((item) => {
                 const isActive = pathname === item.href;
                 return (
