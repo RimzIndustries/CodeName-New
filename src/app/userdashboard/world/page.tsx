@@ -8,7 +8,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { Crown, Map, Users } from 'lucide-react';
+import { Crown, Map as MapIcon, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface Alliance {
@@ -141,7 +141,7 @@ export default function WorldPage() {
                                     </TableHead>
                                     <TableHead className="text-right">
                                         <Button variant="ghost" onClick={() => handleSort('totalLand')}>
-                                            <Map className="h-4 w-4 mr-2" />
+                                            <MapIcon className="h-4 w-4 mr-2" />
                                             Total Tanah {renderSortArrow('totalLand')}
                                         </Button>
                                     </TableHead>
