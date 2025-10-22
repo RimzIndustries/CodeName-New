@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Shield, Menu, Coins, Heart, MapPin, Building2, BarChart3, Users, Swords, LogOut, Crown, Settings, Bell, Globe } from 'lucide-react';
+import { Shield, Menu, Coins, Heart, MapPin, Building2, BarChart3, Users, Swords, LogOut, Crown, Settings, Bell } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'firebase/auth';
@@ -58,7 +58,7 @@ export default function UserDashboardLayout({
     { href: "/userdashboard/buildings", icon: Building2, label: "Konstruksi" },
     { href: "/userdashboard/command", icon: Swords, label: "Komando" },
     { href: "/userdashboard/alliance", icon: Users, label: "Aliansi" },
-    { href: "/userdashboard/world", icon: Globe, label: "Dunia" },
+    { href: "/userdashboard/reports", icon: Bell, label: "Laporan" },
   ]
 
   return (

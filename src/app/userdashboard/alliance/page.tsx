@@ -15,12 +15,13 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import Image from 'next/image';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Crown, Swords, Wrench, Hourglass, Handshake } from 'lucide-react';
+import { Crown, Swords, Wrench, Hourglass, Handshake, Users, MapIcon } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { differenceInSeconds } from 'date-fns';
 
+// --- Interfaces ---
 
 interface AllianceMember {
   id: string;
@@ -42,6 +43,18 @@ interface Alliance {
     tag: string;
     coordinates: { x: number; y: number };
     logoUrl?: string;
+    memberCount: number;
+    totalPride: number;
+    totalLand: number;
+}
+
+interface Player {
+    id: string;
+    prideName: string;
+    allianceId?: string;
+    allianceName?: string;
+    pride: number;
+    land: number;
 }
 
 interface GameTitle {
@@ -58,6 +71,12 @@ interface TransportJob {
     arrivalTime: Timestamp;
 }
 
+type AllianceSortKey = 'totalPride' | 'totalLand' | 'memberCount';
+type PlayerSortKey = 'pride' | 'land';
+type SortDirection = 'asc' | 'desc';
+
+// --- Countdown Components ---
+
 function WarCountdown({ expiryTimestamp }: { expiryTimestamp: Timestamp }) {
   const [timeLeft, setTimeLeft] = useState('');
 
@@ -70,7 +89,6 @@ function WarCountdown({ expiryTimestamp }: { expiryTimestamp: Timestamp }) {
       if (secondsRemaining <= 0) {
         setTimeLeft('Selesai');
         clearInterval(timer);
-        // Data will be cleared by backend process, UI might linger for a bit.
       } else {
         const days = Math.floor(secondsRemaining / 86400);
         const hours = Math.floor((secondsRemaining % 86400) / 3600);
@@ -111,37 +129,33 @@ function TransportCountdown({ arrivalTime }: { arrivalTime: Timestamp }) {
     return <span className="font-mono">{timeLeft}</span>;
 }
 
-export default function AlliancePage() {
+// --- Main Page Component ---
+
+export default function AllianceAndWorldPage() {
     const { user, userProfile } = useAuth();
     const { toast } = useToast();
 
-    const [alliance, setAlliance] = useState<Alliance | null>(null);
+    // --- State for My Alliance Tab ---
+    const [myAlliance, setMyAlliance] = useState<Alliance | null>(null);
     const [members, setMembers] = useState<AllianceMember[]>([]);
     const [titles, setTitles] = useState<GameTitle[]>([]);
     const [votes, setVotes] = useState<Vote[]>([]);
     const [selectedCandidate, setSelectedCandidate] = useState<string>('');
     const [isVoting, setIsVoting] = useState(false);
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoadingMyAlliance, setIsLoadingMyAlliance] = useState(true);
     const [votingPowerDivisor, setVotingPowerDivisor] = useState(100);
-
     const [leaderId, setLeaderId] = useState<string | null>(null);
     const [newAllianceName, setNewAllianceName] = useState('');
     const [newAllianceTag, setNewAllianceTag] = useState('');
     const [isSaving, setIsSaving] = useState(false);
-
-    // Logo edit state
     const [isLogoDialogOpen, setIsLogoDialogOpen] = useState(false);
     const [newLogoUrl, setNewLogoUrl] = useState('');
     const [isSavingLogo, setIsSavingLogo] = useState(false);
-    
-    // War state
-    const [otherAlliances, setOtherAlliances] = useState<Alliance[]>([]);
+    const [otherAlliances, setOtherAlliances] = useState<Omit<Alliance, 'memberCount' | 'totalPride' | 'totalLand'>[]>([]);
     const [warTargetId, setWarTargetId] = useState('');
     const [isDeclaringWar, setIsDeclaringWar] = useState(false);
     const [activeWar, setActiveWar] = useState<any | null>(null);
-    const [enemyAlliance, setEnemyAlliance] = useState<Alliance | null>(null);
-    
-    // Aid state
+    const [enemyAlliance, setEnemyAlliance] = useState<Omit<Alliance, 'memberCount' | 'totalPride' | 'totalLand'> | null>(null);
     const [isAidDialogOpen, setIsAidDialogOpen] = useState(false);
     const [aidTarget, setAidTarget] = useState<AllianceMember | null>(null);
     const [moneyToSend, setMoneyToSend] = useState(0);
@@ -150,66 +164,62 @@ export default function AlliancePage() {
     const [isSendingAid, setIsSendingAid] = useState(false);
     const [incomingTransports, setIncomingTransports] = useState<TransportJob[]>([]);
 
+    // --- State for World Rankings Tab ---
+    const [allAlliances, setAllAlliances] = useState<Alliance[]>([]);
+    const [allPlayers, setAllPlayers] = useState<Player[]>([]);
+    const [isLoadingWorld, setIsLoadingWorld] = useState(true);
+    const [allianceSortKey, setAllianceSortKey] = useState<AllianceSortKey>('totalPride');
+    const [allianceSortDirection, setAllianceSortDirection] = useState<SortDirection>('desc');
+    const [playerSortKey, setPlayerSortKey] = useState<PlayerSortKey>('pride');
+    const [playerSortDirection, setPlayerSortDirection] = useState<SortDirection>('desc');
 
-    // Fetch titles
+
+    // Fetch data for "My Alliance" tab
     useEffect(() => {
-      const titlesCollectionRef = collection(db, 'titles');
-      const unsubscribe = onSnapshot(titlesCollectionRef, (snapshot) => {
-        const titlesList = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as GameTitle[];
-        titlesList.sort((a, b) => a.prideRequired - b.prideRequired);
-        setTitles(titlesList);
-      }, (error) => {
-        console.error("Error fetching titles:", error);
-      });
-      return () => unsubscribe();
-    }, []);
-    
-    // Fetch Game Mechanics
-    useEffect(() => {
-        const fetchMechanics = async () => {
-            try {
-                const mechanicsDocRef = doc(db, 'game-settings', 'game-mechanics');
-                const docSnap = await getDoc(mechanicsDocRef);
-                if (docSnap.exists() && docSnap.data().votingPowerDivisor) {
-                    setVotingPowerDivisor(docSnap.data().votingPowerDivisor);
-                }
-            } catch (error) {
-                console.error("Error fetching game mechanics:", error);
+        // Fetch static data like titles and mechanics once
+        const titlesCollectionRef = collection(db, 'titles');
+        onSnapshot(titlesCollectionRef, (snapshot) => {
+            const titlesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as GameTitle[];
+            titlesList.sort((a, b) => a.prideRequired - b.prideRequired);
+            setTitles(titlesList);
+        });
+        
+        getDoc(doc(db, 'game-settings', 'game-mechanics')).then(docSnap => {
+            if (docSnap.exists() && docSnap.data().votingPowerDivisor) {
+                setVotingPowerDivisor(docSnap.data().votingPowerDivisor);
             }
-        };
-        fetchMechanics();
-    }, []);
+        });
 
-    useEffect(() => {
+        // If user is not in an alliance, stop loading and return
         if (!userProfile?.allianceId || !user) {
-            setIsLoading(false);
-            setAlliance(null);
+            setIsLoadingMyAlliance(false);
+            setMyAlliance(null);
             setMembers([]);
             setVotes([]);
             setIncomingTransports([]);
             return;
         }
 
-        setIsLoading(true);
+        setIsLoadingMyAlliance(true);
         const allianceId = userProfile.allianceId;
         
-        const allianceUnsub = onSnapshot(doc(db, 'alliances', allianceId), (doc) => {
+        const unsubscribes: (()=>void)[] = [];
+
+        // Alliance details
+        unsubscribes.push(onSnapshot(doc(db, 'alliances', allianceId), (doc) => {
             if (doc.exists()) {
                 const allianceData = { id: doc.id, ...doc.data() } as Alliance;
-                setAlliance(allianceData);
+                setMyAlliance(allianceData);
                 setNewAllianceName(allianceData.name);
                 setNewAllianceTag(allianceData.tag);
                 setNewLogoUrl(allianceData.logoUrl || 'https://placehold.co/128x128.png');
             } else {
-                setAlliance(null);
+                setMyAlliance(null);
             }
-        });
+        }));
 
-        const membersQuery = query(collection(db, 'users'), where('allianceId', '==', allianceId));
-        const membersUnsub = onSnapshot(membersQuery, (snapshot) => {
+        // Alliance members
+        unsubscribes.push(onSnapshot(query(collection(db, 'users'), where('allianceId', '==', allianceId)), (snapshot) => {
             const memberList = snapshot.docs.map(doc => ({
                 id: doc.id,
                 prideName: doc.data().prideName,
@@ -219,27 +229,25 @@ export default function AlliancePage() {
             } as AllianceMember));
             memberList.sort((a, b) => b.land - a.land);
             setMembers(memberList);
-        });
+        }));
 
-        const votesQuery = query(collection(db, 'votes'), where('allianceId', '==', allianceId));
-        const votesUnsub = onSnapshot(votesQuery, (snapshot) => {
+        // Votes
+        unsubscribes.push(onSnapshot(query(collection(db, 'votes'), where('allianceId', '==', allianceId)), (snapshot) => {
             const voteList = snapshot.docs.map(doc => ({ voterId: doc.id, ...doc.data() } as Vote));
             setVotes(voteList);
             const myVote = voteList.find(v => v.voterId === user?.uid);
             if(myVote) setSelectedCandidate(myVote.candidateId);
-            setIsLoading(false);
-        });
+            setIsLoadingMyAlliance(false);
+        }));
         
-        // Fetch other alliances for war declaration
-        const otherAlliancesQuery = query(collection(db, 'alliances'), where('__name__', '!=', allianceId));
-        getDocs(otherAlliancesQuery).then(snapshot => {
-            const alliancesList = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}) as Alliance);
+        // Other alliances for war declaration
+        getDocs(query(collection(db, 'alliances'), where('__name__', '!=', allianceId))).then(snapshot => {
+            const alliancesList = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}) as Omit<Alliance, 'memberCount' | 'totalPride' | 'totalLand'>);
             setOtherAlliances(alliancesList);
         });
 
-        // Listen for active wars
-        const warQuery = query(collection(db, 'wars'), where('participants', 'array-contains', allianceId));
-        const warUnsub = onSnapshot(warQuery, async (snapshot) => {
+        // Active wars
+        unsubscribes.push(onSnapshot(query(collection(db, 'wars'), where('participants', 'array-contains', allianceId)), async (snapshot) => {
             if (!snapshot.empty) {
                 const warData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
                 setActiveWar(warData);
@@ -247,34 +255,100 @@ export default function AlliancePage() {
                 if (enemyId) {
                     const enemyDoc = await getDoc(doc(db, 'alliances', enemyId));
                     if (enemyDoc.exists()) {
-                        setEnemyAlliance({ id: enemyDoc.id, ...enemyDoc.data() } as Alliance);
+                        setEnemyAlliance({ id: enemyDoc.id, ...enemyDoc.data() } as Omit<Alliance, 'memberCount' | 'totalPride' | 'totalLand'>);
                     }
                 }
             } else {
                 setActiveWar(null);
                 setEnemyAlliance(null);
             }
-        });
+        }));
         
-        // Listen for incoming transports
-        const transportQuery = query(collection(db, 'transportQueue'), where('recipientId', '==', user.uid));
-        const transportUnsub = onSnapshot(transportQuery, (snapshot) => {
+        // Incoming transports
+        unsubscribes.push(onSnapshot(query(collection(db, 'transportQueue'), where('recipientId', '==', user.uid)), (snapshot) => {
             const transportList = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}) as TransportJob);
             transportList.sort((a, b) => a.arrivalTime.toMillis() - b.arrivalTime.toMillis());
             setIncomingTransports(transportList);
-        });
+        }));
 
 
-        return () => {
-            allianceUnsub();
-            membersUnsub();
-            votesUnsub();
-            warUnsub();
-            transportUnsub();
-        };
+        return () => unsubscribes.forEach(unsub => unsub());
 
     }, [userProfile?.allianceId, user?.uid]);
     
+    // Fetch data for "World Rankings" tab
+    useEffect(() => {
+        setIsLoadingWorld(true);
+        const fetchData = async () => {
+            try {
+                const [alliancesSnapshot, usersSnapshot] = await Promise.all([
+                    getDocs(collection(db, 'alliances')),
+                    getDocs(collection(db, 'users'))
+                ]);
+
+                const allianceMap = new Map<string, {name: string, tag: string}>();
+                alliancesSnapshot.forEach(doc => {
+                    allianceMap.set(doc.id, { name: doc.data().name, tag: doc.data().tag });
+                });
+
+                const userStatsByAlliance = new Map<string, { pride: number; land: number; members: number }>();
+                const playerList: Player[] = [];
+
+                usersSnapshot.forEach(doc => {
+                    const data = doc.data();
+                    if(data.role === 'user') {
+                        const allianceId = data.allianceId;
+                        const allianceInfo = allianceId ? allianceMap.get(allianceId) : undefined;
+                        
+                        playerList.push({
+                            id: doc.id,
+                            prideName: data.prideName,
+                            allianceId: allianceId,
+                            allianceName: allianceInfo?.name || 'Tanpa Aliansi',
+                            pride: data.pride || 0,
+                            land: data.land || 0,
+                        });
+
+                        if (allianceId) {
+                            const stats = userStatsByAlliance.get(allianceId) || { pride: 0, land: 0, members: 0 };
+                            stats.pride += data.pride || 0;
+                            stats.land += data.land || 0;
+                            stats.members += 1;
+                            userStatsByAlliance.set(allianceId, stats);
+                        }
+                    }
+                });
+
+                const allianceList: Alliance[] = alliancesSnapshot.docs.map(doc => {
+                    const data = doc.data();
+                    const stats = userStatsByAlliance.get(doc.id) || { pride: 0, land: 0, members: 0 };
+                    return {
+                        id: doc.id,
+                        name: data.name,
+                        tag: data.tag,
+                        logoUrl: data.logoUrl,
+                        memberCount: stats.members,
+                        totalPride: stats.pride,
+                        totalLand: stats.land,
+                        coordinates: {x: 0, y: 0}, // Placeholder, not used in this context
+                    };
+                });
+
+                setAllAlliances(allianceList);
+                setAllPlayers(playerList);
+
+            } catch (error) {
+                console.error("Error fetching world data:", error);
+                toast({ title: "Gagal memuat data dunia", variant: "destructive" });
+            } finally {
+                setIsLoadingWorld(false);
+            }
+        };
+        fetchData();
+    }, [toast]);
+    
+    // --- Memoized Calculations & Derived State ---
+
     const voteCounts = useMemo(() => {
         const counts: { [key: string]: number } = {};
         for (const vote of votes) {
@@ -318,6 +392,35 @@ export default function AlliancePage() {
         return votes.some(vote => vote.voterId === user?.uid);
     }, [votes, user?.uid]);
     
+    const leaderDisplayName = useMemo(() => {
+        const leader = members.find(m => m.id === leaderId);
+        if (!leader) return 'Belum ada';
+        return getFullMemberNameString(leader);
+    }, [members, leaderId, titles]);
+
+    const sortedAlliances = useMemo(() => {
+        return [...allAlliances].sort((a, b) => {
+            const valA = a[allianceSortKey];
+            const valB = b[allianceSortKey];
+            if (valA < valB) return allianceSortDirection === 'asc' ? -1 : 1;
+            if (valA > valB) return allianceSortDirection === 'asc' ? 1 : -1;
+            return b.totalPride - a.totalPride;
+        });
+    }, [allAlliances, allianceSortKey, allianceSortDirection]);
+    
+    const sortedPlayers = useMemo(() => {
+        return [...allPlayers].sort((a, b) => {
+            const valA = a[playerSortKey];
+            const valB = b[playerSortKey];
+            if (valA < valB) return playerSortDirection === 'asc' ? -1 : 1;
+            if (valA > valB) return playerSortDirection === 'asc' ? 1 : -1;
+            return b.pride - a.pride;
+        });
+    }, [allPlayers, playerSortKey, playerSortDirection]);
+
+
+    // --- Helper Functions ---
+    
     const getTitleNameForPride = (pride: number) => {
         if (!titles || titles.length === 0) return 'Tanpa Gelar';
         const achievedTitle = [...titles].reverse().find(t => pride >= t.prideRequired);
@@ -349,15 +452,18 @@ export default function AlliancePage() {
     const getFullMemberNameString = (member: AllianceMember) => {
         if (!member) return '';
         const title = getTitleNameForPride(member.pride);
-        return `${member.prideName} (${title} - {member.province})`;
+        return `${member.prideName} (${title} - ${member.province})`;
     }
 
-    const leaderDisplayName = useMemo(() => {
-        const leader = members.find(m => m.id === leaderId);
-        if (!leader) return 'Belum ada';
-        return getFullMemberNameString(leader);
-    }, [members, leaderId, titles]);
+    const renderSortArrow = (key: AllianceSortKey | PlayerSortKey, type: 'alliance' | 'player') => {
+        const currentKey = type === 'alliance' ? allianceSortKey : playerSortKey;
+        const currentDirection = type === 'alliance' ? allianceSortDirection : playerSortDirection;
+        if (currentKey !== key) return null;
+        return currentDirection === 'asc' ? '▲' : '▼';
+    };
 
+
+    // --- Event Handlers ---
 
     const handleVote = async () => {
         if (!user || !userProfile?.allianceId || !selectedCandidate) {
@@ -375,7 +481,6 @@ export default function AlliancePage() {
             const votedMember = members.find(m => m.id === selectedCandidate);
             toast({ title: "Suara berhasil diberikan!", description: `Anda telah memilih ${getFullMemberNameString(votedMember!)}.` });
 
-            // Add to activity log
             await addDoc(collection(db, "activityLog"), {
               userId: user.uid,
               prideName: userProfile.prideName,
@@ -394,25 +499,20 @@ export default function AlliancePage() {
     
     const handleUpdateAlliance = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!userProfile?.allianceId) {
-            toast({ title: "Gagal Memperbarui", description: "Anda tidak berada dalam aliansi.", variant: "destructive" });
-            return;
-        }
+        if (!userProfile?.allianceId) return;
         if (!newAllianceName || !newAllianceTag) {
-            toast({ title: "Input Tidak Valid", description: "Nama dan tag aliansi tidak boleh kosong.", variant: "destructive" });
+            toast({ title: "Input Tidak Valid", variant: "destructive" });
             return;
         }
         setIsSaving(true);
         try {
-            const allianceRef = doc(db, 'alliances', userProfile.allianceId);
-            await updateDoc(allianceRef, {
+            await updateDoc(doc(db, 'alliances', userProfile.allianceId), {
                 name: newAllianceName,
                 tag: newAllianceTag.toUpperCase(),
             });
-            toast({ title: "Aliansi Diperbarui", description: "Nama dan tag aliansi berhasil diperbarui." });
+            toast({ title: "Aliansi Diperbarui" });
         } catch (error) {
-            console.error("Error updating alliance:", error);
-            toast({ title: "Gagal Memperbarui", description: "Pastikan Anda adalah pemimpin aliansi yang sah atau admin.", variant: "destructive" });
+            toast({ title: "Gagal Memperbarui", variant: "destructive" });
         } finally {
             setIsSaving(false);
         }
@@ -420,23 +520,14 @@ export default function AlliancePage() {
     
     const handleUpdateLogo = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!userProfile?.allianceId) {
-            toast({ title: "Gagal Memperbarui", description: "Anda tidak berada dalam aliansi.", variant: "destructive" });
-            return;
-        }
-        if (!newLogoUrl) {
-            toast({ title: "URL Logo tidak boleh kosong", variant: "destructive" });
-            return;
-        }
+        if (!userProfile?.allianceId || !newLogoUrl) return;
         setIsSavingLogo(true);
         try {
-            const allianceRef = doc(db, 'alliances', userProfile.allianceId);
-            await updateDoc(allianceRef, { logoUrl: newLogoUrl });
+            await updateDoc(doc(db, 'alliances', userProfile.allianceId), { logoUrl: newLogoUrl });
             toast({ title: "Logo Aliansi Diperbarui" });
             setIsLogoDialogOpen(false);
         } catch (error) {
-            console.error("Error updating alliance logo:", error);
-            toast({ title: "Gagal Memperbarui Logo", description: "Pastikan Anda adalah pemimpin aliansi yang sah atau admin.", variant: "destructive" });
+            toast({ title: "Gagal Memperbarui Logo", variant: "destructive" });
         } finally {
             setIsSavingLogo(false);
         }
@@ -448,22 +539,20 @@ export default function AlliancePage() {
             return;
         }
         if (!warTargetId || !userProfile?.allianceId) {
-            toast({ title: "Target Tidak Valid", description: "Silakan pilih aliansi untuk diajak perang.", variant: "destructive"});
+            toast({ title: "Target Tidak Valid", variant: "destructive"});
             return;
         }
         if (activeWar) {
-            toast({ title: "Sudah Berperang", description: "Aliansi Anda sudah dalam kondisi perang.", variant: "destructive"});
+            toast({ title: "Sudah Berperang", variant: "destructive"});
             return;
         }
 
         setIsDeclaringWar(true);
         try {
-            // Check if a war already exists between these two alliances
             const existingWarQuery = query(collection(db, 'wars'), where('participants', 'in', [[userProfile.allianceId, warTargetId], [warTargetId, userProfile.allianceId]]));
             const existingWarSnapshot = await getDocs(existingWarQuery);
-
             if (!existingWarSnapshot.empty) {
-                toast({ title: "Perang Sudah Ada", description: "Sudah ada perang yang tercatat antara kedua aliansi ini.", variant: "destructive" });
+                toast({ title: "Perang Sudah Ada", variant: "destructive" });
                 setIsDeclaringWar(false);
                 return;
             }
@@ -482,7 +571,6 @@ export default function AlliancePage() {
             toast({ title: "Perang Dideklarasikan!", description: `Aliansi Anda sekarang berperang dengan ${targetAlliance?.name}.`});
             setWarTargetId('');
         } catch (error) {
-            console.error("Error declaring war:", error);
             toast({ title: "Gagal Mendeklarasikan Perang", variant: "destructive"});
         } finally {
             setIsDeclaringWar(false);
@@ -498,10 +586,7 @@ export default function AlliancePage() {
     };
     
     const handleSendAid = async () => {
-        if (!user || !userProfile || !aidTarget || !userProfile.allianceId) {
-            toast({ title: "Gagal mengirim bantuan", variant: "destructive" });
-            return;
-        }
+        if (!user || !userProfile || !aidTarget || !userProfile.allianceId) return;
 
         setIsSendingAid(true);
         const batch = writeBatch(db);
@@ -509,18 +594,16 @@ export default function AlliancePage() {
         
         const totalMoney = moneyToSend || 0;
         const totalFood = foodToSend || 0;
-        let totalTroopsSent = 0;
         
         const hasResources = totalMoney > 0 || totalFood > 0;
         const hasTroops = Object.values(troopsToSend).some(val => val > 0);
 
         if (!hasResources && !hasTroops) {
-            toast({ title: "Tidak ada yang dikirim", description: "Masukkan jumlah sumber daya atau pasukan untuk dikirim.", variant: "destructive" });
+            toast({ title: "Tidak ada yang dikirim", variant: "destructive" });
             setIsSendingAid(false);
             return;
         }
 
-        // Validate and deduct resources
         if (hasResources) {
             if (totalMoney > (userProfile.money ?? 0) || totalFood > (userProfile.food ?? 0)) {
                 toast({ title: "Sumber daya tidak cukup", variant: "destructive" });
@@ -531,13 +614,11 @@ export default function AlliancePage() {
             if(totalFood > 0) batch.update(userRef, { food: increment(-totalFood) });
         }
 
-        // Validate and deduct troops
         if (hasTroops) {
             for (const unit in troopsToSend) {
                 const amount = troopsToSend[unit];
-                totalTroopsSent += amount;
                 if (amount > (userProfile.units?.[unit as keyof typeof userProfile.units] ?? 0)) {
-                    toast({ title: "Pasukan tidak cukup", description: `Anda tidak memiliki cukup ${unit}.`, variant: "destructive" });
+                    toast({ title: "Pasukan tidak cukup", variant: "destructive" });
                     setIsSendingAid(false);
                     return;
                 }
@@ -545,56 +626,63 @@ export default function AlliancePage() {
             }
         }
         
-        const transportTimeMinutes = 180; // 3 hours
+        const transportTimeMinutes = 180;
         const arrivalTime = Timestamp.fromMillis(Date.now() + transportTimeMinutes * 60 * 1000);
         
         if (hasResources) {
              const transportRef = doc(collection(db, 'transportQueue'));
              batch.set(transportRef, {
-                senderId: user.uid,
-                senderName: userProfile.prideName,
-                recipientId: aidTarget.id,
-                recipientName: aidTarget.prideName,
-                allianceId: userProfile.allianceId,
-                type: 'resource',
-                payload: { money: totalMoney, food: totalFood },
-                createdAt: serverTimestamp(),
-                arrivalTime: arrivalTime,
+                senderId: user.uid, senderName: userProfile.prideName, recipientId: aidTarget.id,
+                recipientName: aidTarget.prideName, allianceId: userProfile.allianceId, type: 'resource',
+                payload: { money: totalMoney, food: totalFood }, createdAt: serverTimestamp(), arrivalTime: arrivalTime,
             });
         }
         
         if (hasTroops) {
             const transportRef = doc(collection(db, 'transportQueue'));
              batch.set(transportRef, {
-                senderId: user.uid,
-                senderName: userProfile.prideName,
-                recipientId: aidTarget.id,
-                recipientName: aidTarget.prideName,
-                allianceId: userProfile.allianceId,
-                type: 'troops',
-                payload: { units: troopsToSend },
-                createdAt: serverTimestamp(),
-                arrivalTime: arrivalTime,
+                senderId: user.uid, senderName: userProfile.prideName, recipientId: aidTarget.id,
+                recipientName: aidTarget.prideName, allianceId: userProfile.allianceId, type: 'troops',
+                payload: { units: troopsToSend }, createdAt: serverTimestamp(), arrivalTime: arrivalTime,
             });
         }
 
         try {
             await batch.commit();
-            toast({ title: "Bantuan Terkirim", description: `Bantuan Anda sedang dalam perjalanan ke ${aidTarget.prideName}.`});
+            toast({ title: "Bantuan Terkirim"});
             setIsAidDialogOpen(false);
         } catch (error) {
-             console.error("Error sending aid: ", error);
-             toast({ title: "Gagal mengirim bantuan", description: "Terjadi kesalahan.", variant: "destructive" });
+             toast({ title: "Gagal mengirim bantuan", variant: "destructive" });
         } finally {
             setIsSendingAid(false);
         }
     };
+    
+    const handleAllianceSort = (key: AllianceSortKey) => {
+        if (allianceSortKey === key) {
+            setAllianceSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setAllianceSortKey(key);
+            setAllianceSortDirection('desc');
+        }
+    };
+    
+    const handlePlayerSort = (key: PlayerSortKey) => {
+        if (playerSortKey === key) {
+            setPlayerSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setPlayerSortKey(key);
+            setPlayerSortDirection('desc');
+        }
+    };
+    
+    // --- Render Logic ---
 
-    if (isLoading) {
+    if (isLoadingMyAlliance) {
         return <Card><CardContent className="p-6 text-center">Memuat data aliansi...</CardContent></Card>
     }
 
-    if (!userProfile?.allianceId || !alliance) {
+    if (!userProfile?.allianceId || !myAlliance) {
         return (
             <Card>
                 <CardHeader className="text-center p-4">
@@ -609,292 +697,220 @@ export default function AlliancePage() {
     
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader className="text-center p-4 space-y-2">
-          <CardTitle className="text-xl">Aliansi ({alliance.coordinates?.x}:{alliance.coordinates?.y}) {alliance.name}</CardTitle>
-          <p className="font-mono text-muted-foreground text-lg">[{alliance.tag}]</p>
-          
-          <div className="relative pt-4 flex flex-col items-center gap-2">
-              <Image
-                  src={alliance.logoUrl || 'https://placehold.co/128x128.png'}
-                  alt="Logo Aliansi"
-                  width={100}
-                  height={100}
-                  className="rounded-lg border-2 border-primary/20 shadow-md"
-                  data-ai-hint="emblem shield"
-              />
-              {canEditAlliance && (
-                   <Dialog open={isLogoDialogOpen} onOpenChange={setIsLogoDialogOpen}>
-                      <DialogTrigger asChild>
-                         <Button variant="outline" size="sm">Ganti Logo</Button>
-                      </DialogTrigger>
-                      <DialogContent>
-                          <DialogHeader>
-                              <DialogTitle>Ganti Logo Aliansi</DialogTitle>
-                              <DialogDescription>
-                                  Masukkan URL gambar baru untuk logo aliansi Anda. Disarankan ukuran 1:1.
-                              </DialogDescription>
-                          </DialogHeader>
-                          <form onSubmit={handleUpdateLogo} className="space-y-4 py-4">
-                              <div className="grid gap-2">
-                                  <Label htmlFor="logo-url">URL Logo</Label>
-                                  <Input
-                                      id="logo-url"
-                                      value={newLogoUrl}
-                                      onChange={e => setNewLogoUrl(e.target.value)}
-                                      placeholder="https://placehold.co/128x128.png"
-                                      required
-                                  />
-                              </div>
-                              <DialogFooter>
-                                  <Button type="button" variant="ghost" onClick={() => setIsLogoDialogOpen(false)}>Batal</Button>
-                                  <Button type="submit" disabled={isSavingLogo}>
-                                      {isSavingLogo ? "Menyimpan..." : "Simpan"}
-                                  </Button>
-                              </DialogFooter>
-                          </form>
-                      </DialogContent>
-                  </Dialog>
-              )}
-          </div>
-          <p className="text-sm text-primary pt-2">Pemimpin Saat Ini: <span>{leaderDisplayName}</span></p>
-        </CardHeader>
-        <CardContent className="space-y-6 p-4">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nama Pride</TableHead>
-                  <TableHead>Jabatan</TableHead>
-                  <TableHead className="text-right">Tanah</TableHead>
-                  <TableHead className="text-right">Suara Diterima</TableHead>
-                  <TableHead className="text-right">Hak Pilih</TableHead>
-                  <TableHead className="text-right">Aksi</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {members.length > 0 ? members.map(member => (
-                  <TableRow key={member.id}>
-                      <TableCell className="flex items-center gap-2">
-                          {member.id === leaderId && <Crown className="h-4 w-4 text-yellow-500" />}
-                          {member.prideName}
-                      </TableCell>
-                      <TableCell>{getMemberJabatan(member)}</TableCell>
-                      <TableCell className="text-right">{member.land.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{(voteCounts[member.id] || 0).toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{Math.floor(member.land / votingPowerDivisor).toLocaleString()}</TableCell>
-                      <TableCell className="text-right">
-                        {member.id !== user?.uid && (
-                           <Button variant="outline" size="sm" onClick={() => openAidDialog(member)}>Kirim Bantuan</Button>
-                        )}
-                      </TableCell>
-                  </TableRow>
-                )) : (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">Tidak ada anggota dalam aliansi ini.</TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="border-t border-border pt-6">
-              <h3 className="text-lg text-center mb-4 text-accent">Berikan Suaramu</h3>
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                  <div className="flex items-center gap-2">
-                      <span className="text-sm">Pilih Kandidat:</span>
-                      <Select onValueChange={setSelectedCandidate} value={selectedCandidate}>
-                          <SelectTrigger className="w-[220px] bg-input/50">
-                              <SelectValue placeholder="Pilih seorang pemain..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                              {members.map(member => (
-                                  <SelectItem key={member.id} value={member.id}>{getFullMemberName(member)}</SelectItem>
-                              ))}
-                          </SelectContent>
-                      </Select>
+        <Tabs defaultValue="my-alliance">
+            <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="my-alliance">Aliansiku</TabsTrigger>
+                <TabsTrigger value="world-rankings">Peringkat Dunia</TabsTrigger>
+            </TabsList>
+            
+            {/* My Alliance Tab */}
+            <TabsContent value="my-alliance" className="space-y-6 mt-4">
+              <Card>
+                <CardHeader className="text-center p-4 space-y-2">
+                  <CardTitle className="text-xl">Aliansi ({myAlliance.coordinates?.x}:{myAlliance.coordinates?.y}) {myAlliance.name}</CardTitle>
+                  <p className="font-mono text-muted-foreground text-lg">[{myAlliance.tag}]</p>
+                  <div className="relative pt-4 flex flex-col items-center gap-2">
+                      <Image
+                          src={myAlliance.logoUrl || 'https://placehold.co/128x128.png'}
+                          alt="Logo Aliansi" width={100} height={100}
+                          className="rounded-lg border-2 border-primary/20 shadow-md"
+                          data-ai-hint="emblem shield"
+                      />
+                      {canEditAlliance && (
+                           <Dialog open={isLogoDialogOpen} onOpenChange={setIsLogoDialogOpen}>
+                              <DialogTrigger asChild><Button variant="outline" size="sm">Ganti Logo</Button></DialogTrigger>
+                              <DialogContent>
+                                  <DialogHeader>
+                                      <DialogTitle>Ganti Logo Aliansi</DialogTitle>
+                                      <DialogDescription>Masukkan URL gambar baru. Disarankan ukuran 1:1.</DialogDescription>
+                                  </DialogHeader>
+                                  <form onSubmit={handleUpdateLogo} className="space-y-4 py-4">
+                                      <div className="grid gap-2">
+                                          <Label htmlFor="logo-url">URL Logo</Label>
+                                          <Input id="logo-url" value={newLogoUrl} onChange={e => setNewLogoUrl(e.target.value)} required />
+                                      </div>
+                                      <DialogFooter>
+                                          <Button type="button" variant="ghost" onClick={() => setIsLogoDialogOpen(false)}>Batal</Button>
+                                          <Button type="submit" disabled={isSavingLogo}>{isSavingLogo ? "Menyimpan..." : "Simpan"}</Button>
+                                      </DialogFooter>
+                                  </form>
+                              </DialogContent>
+                          </Dialog>
+                      )}
                   </div>
-                  <Button 
-                      className="bg-accent text-accent-foreground hover:bg-accent/90" 
-                      onClick={handleVote}
-                      disabled={isVoting || !selectedCandidate}
-                  >
-                      {isVoting ? "Memberikan Suara..." : (userHasVoted ? "Ubah Pilihan Suara" : "Berikan Suara")}
-                  </Button>
-              </div>
-          </div>
+                  <p className="text-sm text-primary pt-2">Pemimpin Saat Ini: <span>{leaderDisplayName}</span></p>
+                </CardHeader>
+                <CardContent className="space-y-6 p-4">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader><TableRow><TableHead>Nama Pride</TableHead><TableHead>Jabatan</TableHead><TableHead className="text-right">Tanah</TableHead><TableHead className="text-right">Suara</TableHead><TableHead className="text-right">Hak Pilih</TableHead><TableHead className="text-right">Aksi</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {members.length > 0 ? members.map(member => (
+                          <TableRow key={member.id}>
+                              <TableCell className="flex items-center gap-2">{member.id === leaderId && <Crown className="h-4 w-4 text-yellow-500" />}{member.prideName}</TableCell>
+                              <TableCell>{getMemberJabatan(member)}</TableCell>
+                              <TableCell className="text-right">{member.land.toLocaleString()}</TableCell>
+                              <TableCell className="text-right">{(voteCounts[member.id] || 0).toLocaleString()}</TableCell>
+                              <TableCell className="text-right">{Math.floor(member.land / votingPowerDivisor).toLocaleString()}</TableCell>
+                              <TableCell className="text-right">{member.id !== user?.uid && (<Button variant="outline" size="sm" onClick={() => openAidDialog(member)}>Bantuan</Button>)}</TableCell>
+                          </TableRow>
+                        )) : <TableRow><TableCell colSpan={6} className="text-center">Tidak ada anggota.</TableCell></TableRow>}
+                      </TableBody>
+                    </Table>
+                  </div>
 
-          {canEditAlliance && (
-              <>
-              <Separator />
-              <div className="pt-2">
-                  <h3 className="text-lg text-center mb-4 text-primary">Manajemen Aliansi</h3>
-                  <form onSubmit={handleUpdateAlliance} className="space-y-4 max-w-md mx-auto">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="grid gap-2">
-                              <Label htmlFor="alliance-name">Nama Aliansi</Label>
-                              <Input id="alliance-name" value={newAllianceName} onChange={e => setNewAllianceName(e.target.value)} required />
+                  <div className="border-t pt-6"><h3 className="text-lg text-center mb-4 text-accent">Berikan Suaramu</h3>
+                      <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                          <div className="flex items-center gap-2">
+                              <span className="text-sm">Pilih Kandidat:</span>
+                              <Select onValueChange={setSelectedCandidate} value={selectedCandidate}>
+                                  <SelectTrigger className="w-[220px] bg-input/50"><SelectValue placeholder="Pilih pemain..." /></SelectTrigger>
+                                  <SelectContent>{members.map(member => (<SelectItem key={member.id} value={member.id}>{getFullMemberName(member)}</SelectItem>))}</SelectContent>
+                              </Select>
                           </div>
-                          <div className="grid gap-2">
-                              <Label htmlFor="alliance-tag">Tag Aliansi</Label>
-                              <Input id="alliance-tag" value={newAllianceTag} onChange={e => setNewAllianceTag(e.target.value)} required maxLength={200} />
-                          </div>
+                          <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={handleVote} disabled={isVoting || !selectedCandidate}>{isVoting ? "Memberikan..." : (userHasVoted ? "Ubah Pilihan" : "Beri Suara")}</Button>
                       </div>
-                      <Button type="submit" disabled={isSaving} className="w-full">
-                          {isSaving ? "Menyimpan..." : "Simpan Perubahan"}
-                      </Button>
-                  </form>
-              </div>
-              </>
-          )}
-        </CardContent>
-      </Card>
+                  </div>
+
+                  {canEditAlliance && (
+                      <><Separator />
+                      <div className="pt-2"><h3 className="text-lg text-center mb-4 text-primary">Manajemen Aliansi</h3>
+                          <form onSubmit={handleUpdateAlliance} className="space-y-4 max-w-md mx-auto">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                  <div className="grid gap-2"><Label htmlFor="alliance-name">Nama Aliansi</Label><Input id="alliance-name" value={newAllianceName} onChange={e => setNewAllianceName(e.target.value)} required /></div>
+                                  <div className="grid gap-2"><Label htmlFor="alliance-tag">Tag Aliansi</Label><Input id="alliance-tag" value={newAllianceTag} onChange={e => setNewAllianceTag(e.target.value)} required maxLength={200} /></div>
+                              </div>
+                              <Button type="submit" disabled={isSaving} className="w-full">{isSaving ? "Menyimpan..." : "Simpan Perubahan"}</Button>
+                          </form>
+                      </div></>
+                  )}
+                </CardContent>
+              </Card>
       
-      <Card>
-        <CardHeader>
-            <CardTitle>Bantuan Masuk</CardTitle>
-            <CardDescription>Sumber daya dan pasukan yang sedang dalam perjalanan menuju Anda.</CardDescription>
-        </CardHeader>
-        <CardContent>
-            {incomingTransports.length > 0 ? (
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Dari</TableHead>
-                            <TableHead>Isi Bantuan</TableHead>
-                            <TableHead className="text-right">Tiba Dalam</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {incomingTransports.map(job => (
-                            <TableRow key={job.id}>
-                                <TableCell>{job.senderName}</TableCell>
-                                <TableCell>
-                                    {job.type === 'resource' ?
-                                        `Uang: ${job.payload.money.toLocaleString()}, Makanan: ${job.payload.food.toLocaleString()}` :
-                                        `Pasukan: ${Object.entries(job.payload.units).map(([unit, val]) => `${unit} (${val})`).join(', ')}`
-                                    }
-                                </TableCell>
-                                <TableCell className="text-right">
-                                    <TransportCountdown arrivalTime={job.arrivalTime} />
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
-            ) : (
-                <p className="text-sm text-center text-muted-foreground">Tidak ada bantuan yang sedang dalam perjalanan.</p>
-            )}
-        </CardContent>
-      </Card>
+              <Card>
+                <CardHeader><CardTitle>Bantuan Masuk</CardTitle><CardDescription>Sumber daya dan pasukan yang sedang dalam perjalanan.</CardDescription></CardHeader>
+                <CardContent>
+                    {incomingTransports.length > 0 ? (
+                        <Table><TableHeader><TableRow><TableHead>Dari</TableHead><TableHead>Isi</TableHead><TableHead className="text-right">Tiba Dalam</TableHead></TableRow></TableHeader>
+                            <TableBody>{incomingTransports.map(job => (<TableRow key={job.id}><TableCell>{job.senderName}</TableCell><TableCell>{job.type === 'resource' ? `Uang: ${job.payload.money.toLocaleString()}, Makanan: ${job.payload.food.toLocaleString()}` : `Pasukan`}</TableCell><TableCell className="text-right"><TransportCountdown arrivalTime={job.arrivalTime} /></TableCell></TableRow>))}</TableBody>
+                        </Table>
+                    ) : (<p className="text-sm text-center text-muted-foreground">Tidak ada bantuan yang sedang dalam perjalanan.</p>)}
+                </CardContent>
+              </Card>
       
-      <Card>
-          <CardHeader>
-              <CardTitle className="text-destructive">Diplomasi & Perang</CardTitle>
-              <CardDescription>Lihat status perang atau deklarasikan perang baru jika Anda adalah pemimpin.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-                {activeWar ? (
-                     <Alert variant="destructive">
-                        <Swords className="h-4 w-4" />
-                        <AlertTitle>Sedang Berperang!</AlertTitle>
-                        <AlertDescription className="space-y-1">
-                            <p>Aliansi Anda saat ini sedang berperang dengan <strong>{enemyAlliance?.name || 'aliansi musuh'}</strong>.</p>
-                            {activeWar.expiresAt && (
-                                <p className="flex items-center gap-2">
-                                  <Hourglass className="h-4 w-4"/>
-                                  <span>Perang akan berakhir dalam: <WarCountdown expiryTimestamp={activeWar.expiresAt} /></span>
-                                </p>
-                            )}
-                        </AlertDescription>
-                    </Alert>
-                ) : isLeader ? (
-                     <div className="space-y-4">
-                        <p className="text-sm text-muted-foreground">Sebagai pemimpin, Anda dapat mendeklarasikan perang terhadap aliansi lain. Perang akan berlangsung selama 72 jam.</p>
-                        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                            <Select onValueChange={setWarTargetId} value={warTargetId}>
-                                <SelectTrigger className="w-full sm:w-[250px]">
-                                    <SelectValue placeholder="Pilih Aliansi untuk diperangi..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {otherAlliances.map(a => (
-                                        <SelectItem key={a.id} value={a.id}>{a.name} [{a.tag}]</SelectItem>
+              <Card>
+                  <CardHeader><CardTitle className="text-destructive">Diplomasi & Perang</CardTitle><CardDescription>Lihat status perang atau deklarasikan perang baru.</CardDescription></CardHeader>
+                  <CardContent className="space-y-6">
+                        {activeWar ? (
+                             <Alert variant="destructive"><Swords className="h-4 w-4" /><AlertTitle>Sedang Berperang!</AlertTitle>
+                                <AlertDescription className="space-y-1"><p>Aliansi Anda saat ini sedang berperang dengan <strong>{enemyAlliance?.name || 'aliansi musuh'}</strong>.</p>
+                                    {activeWar.expiresAt && (<p className="flex items-center gap-2"><Hourglass className="h-4 w-4"/><span>Perang akan berakhir dalam: <WarCountdown expiryTimestamp={activeWar.expiresAt} /></span></p>)}
+                                </AlertDescription>
+                            </Alert>
+                        ) : isLeader ? (
+                             <div className="space-y-4"><p className="text-sm text-muted-foreground">Sebagai pemimpin, Anda dapat mendeklarasikan perang. Perang berlangsung 72 jam.</p>
+                                <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                                    <Select onValueChange={setWarTargetId} value={warTargetId}>
+                                        <SelectTrigger className="w-full sm:w-[250px]"><SelectValue placeholder="Pilih aliansi..." /></SelectTrigger>
+                                        <SelectContent>{otherAlliances.map(a => (<SelectItem key={a.id} value={a.id}>{a.name} [{a.tag}]</SelectItem>))}</SelectContent>
+                                    </Select>
+                                     <AlertDialog>
+                                        <AlertDialogTrigger asChild><Button variant="destructive" disabled={!warTargetId || isDeclaringWar}>Deklarasikan Perang</Button></AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                            <AlertDialogHeader><AlertDialogTitle>Deklarasikan Perang?</AlertDialogTitle><AlertDialogDescription>Tindakan ini akan memulai permusuhan selama 72 jam.</AlertDialogDescription></AlertDialogHeader>
+                                            <AlertDialogFooter><AlertDialogCancel>Batal</AlertDialogCancel><AlertDialogAction onClick={handleDeclareWar} disabled={isDeclaringWar}>{isDeclaringWar ? "Mendeklarasikan..." : "Ya, Mulai Perang"}</AlertDialogAction></AlertDialogFooter>
+                                        </AlertDialogContent>
+                                    </AlertDialog>
+                                </div>
+                            </div>
+                        ) : (<Alert><Swords className="h-4 w-4" /><AlertTitle>Status: Damai</AlertTitle><AlertDescription>Aliansi Anda tidak sedang dalam perang.</AlertDescription></Alert>)}
+                  </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* World Rankings Tab */}
+            <TabsContent value="world-rankings" className="space-y-6 mt-4">
+                <Card>
+                    <CardHeader><CardTitle>Peringkat Aliansi</CardTitle></CardHeader>
+                    <CardContent>
+                        {isLoadingWorld ? <p className="text-center py-10">Memuat...</p> : allAlliances.length === 0 ? <p className="text-center py-10">Belum ada aliansi.</p> : (
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead className="w-[50px]">#</TableHead><TableHead>Aliansi</TableHead>
+                                        <TableHead className="text-center"><Button variant="ghost" onClick={() => handleAllianceSort('memberCount')}><Users className="h-4 w-4 mr-2" />Anggota {renderSortArrow('memberCount', 'alliance')}</Button></TableHead>
+                                        <TableHead className="text-right"><Button variant="ghost" onClick={() => handleAllianceSort('totalPride')}><Crown className="h-4 w-4 mr-2" />Total Pride {renderSortArrow('totalPride', 'alliance')}</Button></TableHead>
+                                        <TableHead className="text-right"><Button variant="ghost" onClick={() => handleAllianceSort('totalLand')}><MapIcon className="h-4 w-4 mr-2" />Total Tanah {renderSortArrow('totalLand', 'alliance')}</Button></TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {sortedAlliances.map((alliance, index) => (
+                                        <TableRow key={alliance.id}>
+                                            <TableCell>{index + 1}</TableCell>
+                                            <TableCell className="flex items-center gap-3">
+                                                <Image src={alliance.logoUrl || 'https://placehold.co/64x64.png'} alt={`Logo ${alliance.name}`} width={40} height={40} className="rounded-md border" data-ai-hint="emblem shield"/>
+                                                <div><p className="font-medium">{alliance.name}</p><p className="text-sm text-muted-foreground font-mono">[{alliance.tag}]</p></div>
+                                            </TableCell>
+                                            <TableCell className="text-center">{alliance.memberCount}</TableCell>
+                                            <TableCell className="text-right">{(alliance.totalPride || 0).toLocaleString()}</TableCell>
+                                            <TableCell className="text-right">{(alliance.totalLand || 0).toLocaleString()}</TableCell>
+                                        </TableRow>
                                     ))}
-                                </SelectContent>
-                            </Select>
-                             <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                    <Button variant="destructive" disabled={!warTargetId || isDeclaringWar}>Deklarasikan Perang</Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                        <AlertDialogTitle>Deklarasikan Perang?</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                            Apakah Anda yakin ingin mendeklarasikan perang terhadap aliansi yang dipilih? Tindakan ini akan memulai permusuhan terbuka selama 72 jam.
-                                        </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                        <AlertDialogCancel>Batal</AlertDialogCancel>
-                                        <AlertDialogAction onClick={handleDeclareWar} disabled={isDeclaringWar}>
-                                            {isDeclaringWar ? "Mendeklarasikan..." : "Ya, Mulai Perang"}
-                                        </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                </AlertDialogContent>
-                            </AlertDialog>
-                        </div>
-                    </div>
-                ) : (
-                    <Alert>
-                        <Swords className="h-4 w-4" />
-                        <AlertTitle>Status: Damai</AlertTitle>
-                        <AlertDescription>
-                            Aliansi Anda tidak sedang dalam perang. Hanya pemimpin aliansi yang dapat mendeklarasikan perang.
-                        </AlertDescription>
-                    </Alert>
-                )}
-          </CardContent>
-      </Card>
-      
+                                </TableBody>
+                            </Table>
+                        )}
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader><CardTitle>Peringkat Pemain</CardTitle></CardHeader>
+                    <CardContent>
+                        {isLoadingWorld ? <p className="text-center py-10">Memuat...</p> : allPlayers.length === 0 ? <p className="text-center py-10">Belum ada pemain.</p> : (
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead className="w-[50px]">#</TableHead><TableHead>Nama Pride</TableHead><TableHead>Aliansi</TableHead>
+                                        <TableHead className="text-right"><Button variant="ghost" onClick={() => handlePlayerSort('pride')}><Crown className="h-4 w-4 mr-2" />Pride {renderSortArrow('pride', 'player')}</Button></TableHead>
+                                        <TableHead className="text-right"><Button variant="ghost" onClick={() => handlePlayerSort('land')}><MapIcon className="h-4 w-4 mr-2" />Tanah {renderSortArrow('land', 'player')}</Button></TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {sortedPlayers.map((player, index) => (
+                                        <TableRow key={player.id}>
+                                            <TableCell>{index + 1}</TableCell>
+                                            <TableCell className="font-medium">{player.prideName}</TableCell>
+                                            <TableCell className="text-muted-foreground">{player.allianceName}</TableCell>
+                                            <TableCell className="text-right">{(player.pride || 0).toLocaleString()}</TableCell>
+                                            <TableCell className="text-right">{(player.land || 0).toLocaleString()}</TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        )}
+                    </CardContent>
+                </Card>
+            </TabsContent>
+        </Tabs>
+
       <Dialog open={isAidDialogOpen} onOpenChange={setIsAidDialogOpen}>
         <DialogContent>
-            <DialogHeader>
-                <DialogTitle>Kirim Bantuan ke {aidTarget?.prideName}</DialogTitle>
-                <DialogDescription>Pilih sumber daya atau pasukan untuk dikirim. Pengiriman membutuhkan waktu 3 jam.</DialogDescription>
-            </DialogHeader>
+            <DialogHeader><DialogTitle>Kirim Bantuan ke {aidTarget?.prideName}</DialogTitle><DialogDescription>Pengiriman membutuhkan waktu 3 jam.</DialogDescription></DialogHeader>
             <Tabs defaultValue="resources" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="resources">Sumber Daya</TabsTrigger>
-                    <TabsTrigger value="troops">Pasukan</TabsTrigger>
-                </TabsList>
+                <TabsList className="grid w-full grid-cols-2"><TabsTrigger value="resources">Sumber Daya</TabsTrigger><TabsTrigger value="troops">Pasukan</TabsTrigger></TabsList>
                 <TabsContent value="resources">
                     <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="money-to-send">Uang (Anda Punya: {Math.floor(userProfile?.money ?? 0).toLocaleString()})</Label>
-                            <Input id="money-to-send" type="number" min="0" max={Math.floor(userProfile?.money ?? 0)} value={moneyToSend} onChange={e => setMoneyToSend(Number(e.target.value))} />
-                        </div>
-                         <div className="space-y-2">
-                            <Label htmlFor="food-to-send">Makanan (Anda Punya: {Math.floor(userProfile?.food ?? 0).toLocaleString()})</Label>
-                            <Input id="food-to-send" type="number" min="0" max={Math.floor(userProfile?.food ?? 0)} value={foodToSend} onChange={e => setFoodToSend(Number(e.target.value))} />
-                        </div>
+                        <div className="space-y-2"><Label htmlFor="money-to-send">Uang (Anda Punya: {Math.floor(userProfile?.money ?? 0).toLocaleString()})</Label><Input id="money-to-send" type="number" min="0" max={Math.floor(userProfile?.money ?? 0)} value={moneyToSend} onChange={e => setMoneyToSend(Number(e.target.value))} /></div>
+                         <div className="space-y-2"><Label htmlFor="food-to-send">Makanan (Anda Punya: {Math.floor(userProfile?.food ?? 0).toLocaleString()})</Label><Input id="food-to-send" type="number" min="0" max={Math.floor(userProfile?.food ?? 0)} value={foodToSend} onChange={e => setFoodToSend(Number(e.target.value))} /></div>
                     </div>
                 </TabsContent>
                 <TabsContent value="troops">
                      <div className="space-y-4 py-4">
                         {Object.keys(userProfile?.units ?? {}).map(unit => (
-                            <div key={unit} className="space-y-2">
-                                <Label htmlFor={`troop-to-send-${unit}`} className="capitalize">{unit} (Anda Punya: {(userProfile?.units?.[unit as keyof typeof userProfile.units] ?? 0).toLocaleString()})</Label>
-                                <Input id={`troop-to-send-${unit}`} type="number" min="0" max={userProfile?.units?.[unit as keyof typeof userProfile.units] ?? 0} value={troopsToSend[unit] || ''} onChange={e => setTroopsToSend(prev => ({...prev, [unit]: Number(e.target.value)}))} />
-                            </div>
+                            <div key={unit} className="space-y-2"><Label htmlFor={`troop-to-send-${unit}`} className="capitalize">{unit} (Punya: {(userProfile?.units?.[unit as keyof typeof userProfile.units] ?? 0).toLocaleString()})</Label><Input id={`troop-to-send-${unit}`} type="number" min="0" max={userProfile?.units?.[unit as keyof typeof userProfile.units] ?? 0} value={troopsToSend[unit] || ''} onChange={e => setTroopsToSend(prev => ({...prev, [unit]: Number(e.target.value)}))} /></div>
                         ))}
                     </div>
                 </TabsContent>
             </Tabs>
-            <DialogFooter>
-                <Button variant="ghost" onClick={() => setIsAidDialogOpen(false)}>Batal</Button>
-                <Button onClick={handleSendAid} disabled={isSendingAid}>
-                    {isSendingAid ? 'Mengirim...' : 'Kirim Bantuan'}
-                </Button>
-            </DialogFooter>
+            <DialogFooter><Button variant="ghost" onClick={() => setIsAidDialogOpen(false)}>Batal</Button><Button onClick={handleSendAid} disabled={isSendingAid}>{isSendingAid ? 'Mengirim...' : 'Kirim Bantuan'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
