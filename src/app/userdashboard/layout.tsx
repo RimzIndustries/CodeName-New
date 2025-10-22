@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Shield, Menu, Coins, Heart, MapPin, Building2, BarChart3, Users, Swords, LogOut, Crown, Settings, Bell } from 'lucide-react';
+import { Shield, Menu, Coins, Heart, MapPin, Building2, BarChart3, Users, Swords, LogOut, Crown, Settings, Bell, Globe } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'firebase/auth';
@@ -60,6 +60,14 @@ export default function UserDashboardLayout({
     { href: "/userdashboard/command", icon: Swords, label: "Komando" },
     { href: "/userdashboard/alliance", icon: Users, label: "Aliansi" },
   ];
+  
+  const bottomNavItems = [
+    { href: "/userdashboard", icon: BarChart3, label: "Info" },
+    { href: "/userdashboard/buildings", icon: Building2, label: "Bangunan" },
+    { href: "/userdashboard/barracks", icon: Shield, label: "Barak" },
+    { href: "/userdashboard/command", icon: Swords, label: "Komando" },
+    { href: "/userdashboard/world", icon: Globe, label: "Dunia" },
+  ]
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-muted/40">
@@ -98,6 +106,12 @@ export default function UserDashboardLayout({
                       </>
                     )}
                     <DropdownMenuSeparator />
+                     <DropdownMenuItem asChild>
+                      <Link href="/userdashboard/alliance">
+                        <Users className="mr-2 h-4 w-4" />
+                        <span>Aliansi Saya</span>
+                      </Link>
+                    </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <Link href="/userdashboard/settings">
                         <Settings className="mr-2 h-4 w-4" />
@@ -159,8 +173,8 @@ export default function UserDashboardLayout({
       {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-background/95 backdrop-blur-sm">
         <div className="grid h-16 grid-cols-5 items-center justify-items-center gap-1 px-1">
-            {navItems.map((item) => {
-                const isActive = (pathname === item.href) || (item.href === "/userdashboard" && pathname === "/userdashboard/page.tsx");
+            {bottomNavItems.map((item) => {
+                const isActive = pathname === item.href;
                 return (
                     <Button asChild key={item.href} variant="ghost" className={`flex flex-col h-auto p-1.5 w-full text-center ${isActive ? 'bg-card' : ''}`}>
                         <Link href={item.href}>
