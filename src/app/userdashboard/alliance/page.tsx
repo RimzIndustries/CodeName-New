@@ -206,6 +206,11 @@ export default function AllianceAndWorldPage() {
         return `${member.prideName} (${title} - {member.province})`;
     }
 
+    const getMemberJabatan = (member: AllianceMember) => {
+        if (!member) return '';
+        return member.id === leaderId ? 'Pemimpin' : 'Anggota';
+    };
+
     const renderSortArrow = (key: AllianceSortKey | PlayerSortKey, type: 'alliance' | 'player') => {
         const currentKey = type === 'alliance' ? allianceSortKey : playerSortKey;
         const currentDirection = type === 'alliance' ? allianceSortDirection : playerSortDirection;
