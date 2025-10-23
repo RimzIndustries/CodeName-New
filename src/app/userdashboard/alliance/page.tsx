@@ -55,6 +55,7 @@ interface Player {
     allianceName?: string;
     pride: number;
     land: number;
+    province: string;
 }
 
 interface GameTitle {
@@ -351,9 +352,10 @@ export default function AllianceAndWorldPage() {
                             id: doc.id,
                             prideName: data.prideName,
                             allianceId: allianceId,
-                            allianceName: allianceInfo?.name || 'Tanpa Aliansi',
+                            allianceName: allianceInfo ? `${allianceInfo.name} [${allianceInfo.tag}]` : 'Tanpa Aliansi',
                             pride: data.pride || 0,
                             land: data.land || 0,
+                            province: data.province || 'N/A',
                         });
 
                         if (allianceId) {
@@ -984,8 +986,6 @@ export default function AllianceAndWorldPage() {
                                     <TableRow>
                                         <TableHead className="w-[50px]">#</TableHead>
                                         <TableHead>Nama Pride</TableHead>
-                                        <TableHead>Gelar</TableHead>
-                                        <TableHead>Aliansi</TableHead>
                                         <TableHead className="text-right"><Button variant="ghost" onClick={() => handlePlayerSort('pride')}><Crown className="h-4 w-4 mr-2" />Pride {renderSortArrow('pride', 'player')}</Button></TableHead>
                                         <TableHead className="text-right"><Button variant="ghost" onClick={() => handlePlayerSort('land')}><MapIcon className="h-4 w-4 mr-2" />Tanah {renderSortArrow('land', 'player')}</Button></TableHead>
                                     </TableRow>
@@ -994,9 +994,10 @@ export default function AllianceAndWorldPage() {
                                     {sortedPlayers.map((player, index) => (
                                         <TableRow key={player.id}>
                                             <TableCell>{index + 1}</TableCell>
-                                            <TableCell className="font-medium">{player.prideName}</TableCell>
-                                            <TableCell>{getTitleNameForPride(player.pride)}</TableCell>
-                                            <TableCell className="text-muted-foreground">{player.allianceName}</TableCell>
+                                            <TableCell className="font-medium">
+                                                {getTitleNameForPride(player.pride)} - {player.prideName} ({player.province})
+                                                <p className="text-sm text-muted-foreground">{player.allianceName}</p>
+                                            </TableCell>
                                             <TableCell className="text-right">{(player.pride || 0).toLocaleString()}</TableCell>
                                             <TableCell className="text-right">{(player.land || 0).toLocaleString()}</TableCell>
                                         </TableRow>
