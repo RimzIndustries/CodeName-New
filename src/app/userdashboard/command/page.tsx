@@ -40,7 +40,7 @@ interface AttackJob {
     attackerName: string;
     defenderName: string;
     arrivalTime: Timestamp;
-    type: 'attack' | 'spy';
+    type: 'attack'; // Spy is no longer a queued mission
 }
 
 const unitNameMap: { [key: string]: string } = {
@@ -89,8 +89,8 @@ export default function CommandPage() {
     const [selectedWarTarget, setSelectedWarTarget] = useState('');
     const [selectedSpyTarget, setSelectedSpyTarget] = useState('');
 
-    const [playerAttackTroops, setPlayerAttackTroops] = useState<{ [key: string]: number }>({ attack: 0, defense: 0, elite: 0 });
-    const [allianceAttackTroops, setAllianceAttackTroops] = useState<{ [key: string]: number }>({ attack: 0, defense: 0, elite: 0 });
+    const [playerAttackTroops, setPlayerAttackTroops] = useState<{ [key: string]: number }>({ attack: 0, defense: 0, elite: 0, raider: 0 });
+    const [allianceAttackTroops, setAllianceAttackTroops] = useState<{ [key: string]: number }>({ attack: 0, defense: 0, elite: 0, raider: 0 });
     const [spyTroops, setSpyTroops] = useState<{ [key: string]: number }>({ spy: 0 });
 
     const [isAttackingPlayer, setIsAttackingPlayer] = useState(false);
@@ -194,7 +194,7 @@ export default function CommandPage() {
         setIsLoadingAttackQueue(true);
         const q = query(collection(db, 'attackQueue'), where('attackerId', '==', user.uid));
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            const jobs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttackJob));
+            const jobs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttackJob)).filter(job => job.type === 'attack');
             jobs.sort((a, b) => a.arrivalTime.toMillis() - b.arrivalTime.toMillis());
             setAttackQueue(jobs);
             setIsLoadingAttackQueue(false);
@@ -267,7 +267,7 @@ export default function CommandPage() {
         return null;
     }
 
-    const launchMission = async (targetId: string, troops: { [key: string]: number }, type: 'attack' | 'spy') => {
+    const launchAttack = async (targetId: string, troops: { [key: string]: number }) => {
         if (!user || !userProfile) return;
 
         const target = [...targets, ...enemyPrides].find(t => t.id === targetId);
@@ -305,40 +305,132 @@ export default function CommandPage() {
                 defenderName: target.name,
                 units: troops,
                 arrivalTime: arrivalTime,
-                type: type
+                type: 'attack'
             });
             
-            // Add to activity log
             const logRef = doc(collection(db, "activityLog"));
             batch.set(logRef, {
                 userId: user.uid,
                 prideName: userProfile.prideName,
-                type: type === 'attack' ? "attack" : "spy",
-                message: `Melancarkan misi ${type === 'attack' ? 'serangan' : 'spionase'} ke ${target.name}.`,
+                type: "attack",
+                message: `Melancarkan misi serangan ke ${target.name}.`,
                 timestamp: serverTimestamp(),
             });
 
             await batch.commit();
             
-            const missionTypeName = type === 'attack' ? 'Serangan' : 'Spionase';
-            toast({ title: `${missionTypeName} Diluncurkan!`, description: `Pasukan Anda sedang bergerak menuju ${target.name}.` });
+            toast({ title: `Serangan Diluncurkan!`, description: `Pasukan Anda sedang bergerak menuju ${target.name}.` });
 
-            if (type === 'attack') {
-                if (isAttackingPlayer) setPlayerAttackTroops({ attack: 0, defense: 0, elite: 0 });
-                if (isAttackingAlliance) setAllianceAttackTroops({ attack: 0, defense: 0, elite: 0 });
-            } else if (type === 'spy') {
-                setSpyTroops({ spy: 0 });
-            }
+            // Reset troop inputs after successful launch
+            if (isAttackingPlayer) setPlayerAttackTroops({ attack: 0, defense: 0, elite: 0, raider: 0 });
+            if (isAttackingAlliance) setAllianceAttackTroops({ attack: 0, defense: 0, elite: 0, raider: 0 });
 
         } catch (error) {
-            console.error(`Error launching ${type}:`, error);
+            console.error(`Error launching attack:`, error);
             toast({ title: `Gagal Melancarkan Misi`, description: "Terjadi kesalahan.", variant: "destructive" });
         } finally {
-            if (type === 'attack') {
-                setIsAttackingPlayer(false);
-                setIsAttackingAlliance(false);
+            setIsAttackingPlayer(false);
+            setIsAttackingAlliance(false);
+        }
+    };
+    
+    const executeSpyMission = async () => {
+        if (!user || !userProfile || !selectedSpyTarget) {
+            toast({ title: "Target tidak valid", variant: "destructive" });
+            return;
+        }
+
+        setIsSpying(true);
+        const validationError = validateAttack(spyTroops);
+        if (validationError) {
+            toast({ title: "Misi tidak valid", description: validationError, variant: "destructive" });
+            setIsSpying(false);
+            return;
+        }
+        
+        const totalSpies = spyTroops.spy || 0;
+        const targetId = selectedSpyTarget;
+        const targetInfo = targets.find(t => t.id === targetId);
+
+        try {
+            const defenderRef = doc(db, 'users', targetId);
+            const defenderSnap = await getDoc(defenderRef);
+
+            if (!defenderSnap.exists()) {
+                toast({ title: "Target tidak ada", variant: "destructive" });
+                setIsSpying(false);
+                return;
             }
-            if (type === 'spy') setIsSpying(false);
+            const defenderProfile = defenderSnap.data() as UserProfile;
+
+            // Immediately deduct spies
+            const batch = writeBatch(db);
+            const userRef = doc(db, 'users', user.uid);
+            batch.update(userRef, { 'units.spy': increment(-totalSpies) });
+
+            const defenderTotalDefenseTroops = defenderProfile.units.defense || 0;
+            const successChance = Math.max(0.05, (totalSpies * 2) / (defenderTotalDefenseTroops || 1));
+            const isSuccess = Math.random() < successChance;
+            
+            // Create report for attacker
+            const reportRef = doc(collection(db, 'reports'));
+            const reportPayload: any = {
+                type: 'spy',
+                involvedUsers: [user.uid, targetId],
+                attackerId: user.uid,
+                defenderId: targetId,
+                attackerName: userProfile.prideName,
+                defenderName: defenderProfile.prideName,
+                timestamp: serverTimestamp(),
+                readBy: { [user.uid]: false, [targetId]: false }
+            };
+
+            if (isSuccess) {
+                reportPayload.outcomeForAttacker = 'success';
+                reportPayload.intel = {
+                    money: Math.floor(defenderProfile.money),
+                    food: Math.floor(defenderProfile.food),
+                    land: defenderProfile.land,
+                    units: defenderProfile.units,
+                    buildings: defenderProfile.buildings
+                };
+                toast({ title: "Spionase Berhasil!", description: "Laporan intelijen telah dibuat." });
+            } else {
+                reportPayload.outcomeForAttacker = 'failure';
+                toast({ title: "Spionase Gagal", description: "Mata-mata Anda gagal dan tidak kembali.", variant: "destructive" });
+            }
+            batch.set(reportRef, reportPayload);
+
+            // Notify defender
+            const defenderReportRef = doc(collection(db, 'reports'));
+            batch.set(defenderReportRef, {
+                type: 'spy-received',
+                involvedUsers: [targetId], // Only the defender needs to see this
+                attackerId: user.uid,
+                defenderId: targetId,
+                attackerName: userProfile.prideName,
+                defenderName: defenderProfile.prideName,
+                outcomeForAttacker: isSuccess ? 'success' : 'failure',
+                timestamp: serverTimestamp(),
+                readBy: { [targetId]: false }
+            });
+
+            // Log activity
+            const logRef = doc(collection(db, "activityLog"));
+            batch.set(logRef, {
+                userId: user.uid, prideName: userProfile.prideName, type: "spy",
+                message: `Misi spionase instan ke ${targetInfo?.name} ${isSuccess ? 'berhasil' : 'gagal'}.`,
+                timestamp: serverTimestamp(),
+            });
+
+            await batch.commit();
+            setSpyTroops({ spy: 0 });
+
+        } catch (error) {
+            console.error("Error executing spy mission:", error);
+            toast({ title: "Gagal Melakukan Spionase", variant: "destructive" });
+        } finally {
+            setIsSpying(false);
         }
     };
 
@@ -349,7 +441,7 @@ export default function CommandPage() {
             return;
         }
         setIsAttackingPlayer(true);
-        launchMission(selectedPlayerTarget, playerAttackTroops, 'attack');
+        launchAttack(selectedPlayerTarget, playerAttackTroops);
     };
     
     const handleAllianceAttack = () => {
@@ -358,17 +450,8 @@ export default function CommandPage() {
             return;
         }
         setIsAttackingAlliance(true);
-        launchMission(selectedWarTarget, allianceAttackTroops, 'attack');
+        launchAttack(selectedWarTarget, allianceAttackTroops);
     }
-
-    const handleSpyMission = () => {
-        if (!selectedSpyTarget) {
-            toast({ title: "Target tidak valid", description: "Silakan pilih pride untuk dimata-matai.", variant: "destructive" });
-            return;
-        }
-        setIsSpying(true);
-        launchMission(selectedSpyTarget, spyTroops, 'spy');
-    };
 
     return (
         <div className="space-y-4">
@@ -500,7 +583,7 @@ export default function CommandPage() {
                      <Card>
                         <CardHeader className="p-4">
                             <CardTitle className="text-lg text-blue-500">Spionase</CardTitle>
-                            <CardDescription>Kirim mata-mata untuk mengumpulkan intelijen tentang target Anda. Hasilnya akan muncul di Laporan.</CardDescription>
+                            <CardDescription>Kirim mata-mata untuk mengumpulkan intelijen. Hasilnya instan dan akan muncul di Laporan. Mata-mata yang dikirim akan hilang.</CardDescription>
                         </CardHeader>
                         <CardContent className="p-4 space-y-4">
                             <div className="space-y-1">
@@ -535,7 +618,7 @@ export default function CommandPage() {
                                     </div>
                                 </div>
                             </div>
-                            <Button className="w-full" variant="secondary" onClick={handleSpyMission} disabled={isSpying}>
+                            <Button className="w-full" variant="secondary" onClick={executeSpyMission} disabled={isSpying}>
                                 {isSpying ? "Mengirim Mata-mata..." : "Kirim Mata-mata"}
                             </Button>
                         </CardContent>
@@ -565,7 +648,7 @@ export default function CommandPage() {
                                 {attackQueue.map(job => (
                                     <TableRow key={job.id}>
                                         <TableCell className="capitalize flex items-center gap-2">
-                                            {job.type === 'attack' ? <ArrowLeftRight className="h-4 w-4 text-destructive" /> : <Eye className="h-4 w-4 text-blue-500" />}
+                                            <ArrowLeftRight className="h-4 w-4 text-destructive" />
                                             {job.type}
                                         </TableCell>
                                         <TableCell>{job.defenderName}</TableCell>
@@ -584,7 +667,3 @@ export default function CommandPage() {
         </div>
     );
 }
-
-    
-
-    
