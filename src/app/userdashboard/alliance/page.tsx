@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import Image from 'next/image';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Crown, Swords, Wrench, Hourglass, Handshake, Users, MapIcon } from 'lucide-react';
+import { Crown, Swords, Wrench, Hourglass, Handshake, Users, MapIcon, Search, Landmark } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -172,6 +172,46 @@ export default function AllianceAndWorldPage() {
     const [allianceSortDirection, setAllianceSortDirection] = useState<SortDirection>('desc');
     const [playerSortKey, setPlayerSortKey] = useState<PlayerSortKey>('pride');
     const [playerSortDirection, setPlayerSortDirection] = useState<SortDirection>('desc');
+
+    // --- State for Exploration Tab ---
+    const [searchX, setSearchX] = useState('');
+    const [searchY, setSearchY] = useState('');
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchedAlliance, setSearchedAlliance] = useState<Omit<Alliance, 'memberCount' | 'totalPride' | 'totalLand'> | null>(null);
+    const [searchedAllianceMembers, setSearchedAllianceMembers] = useState<AllianceMember[]>([]);
+    const [noAllianceFound, setNoAllianceFound] = useState(false);
+
+
+    // --- Helper Functions ---
+    const getTitleNameForPride = (pride: number) => {
+        if (!titles || titles.length === 0) return 'Tanpa Gelar';
+        const achievedTitle = [...titles].reverse().find(t => pride >= t.prideRequired);
+        return achievedTitle ? achievedTitle.name : 'Tanpa Gelar';
+    };
+
+    const getFullMemberName = (member: AllianceMember) => {
+        if (!member) return null;
+        const title = getTitleNameForPride(member.pride);
+        return (
+            <>
+                {member.prideName}{' '}
+                <span className="text-sm text-muted-foreground">({title} - {member.province})</span>
+            </>
+        );
+    }
+    
+    const getFullMemberNameString = (member: AllianceMember) => {
+        if (!member) return '';
+        const title = getTitleNameForPride(member.pride);
+        return `${member.prideName} (${title} - {member.province})`;
+    }
+
+    const renderSortArrow = (key: AllianceSortKey | PlayerSortKey, type: 'alliance' | 'player') => {
+        const currentKey = type === 'alliance' ? allianceSortKey : playerSortKey;
+        const currentDirection = type === 'alliance' ? allianceSortDirection : playerSortDirection;
+        if (currentKey !== key) return null;
+        return currentDirection === 'asc' ? '▲' : '▼';
+    };
 
 
     // Fetch data for "My Alliance" tab
@@ -330,7 +370,7 @@ export default function AllianceAndWorldPage() {
                         memberCount: stats.members,
                         totalPride: stats.pride,
                         totalLand: stats.land,
-                        coordinates: {x: 0, y: 0}, // Placeholder, not used in this context
+                        coordinates: data.coordinates,
                     };
                 });
 
@@ -347,49 +387,6 @@ export default function AllianceAndWorldPage() {
         fetchData();
     }, [toast]);
     
-    // --- Helper Functions ---
-    
-    const getTitleNameForPride = (pride: number) => {
-        if (!titles || titles.length === 0) return 'Tanpa Gelar';
-        const achievedTitle = [...titles].reverse().find(t => pride >= t.prideRequired);
-        return achievedTitle ? achievedTitle.name : 'Tanpa Gelar';
-    };
-
-    const getMemberJabatan = (member: AllianceMember) => {
-        if (!member) return null;
-        const title = getTitleNameForPride(member.pride);
-        return (
-            <>
-                <span className="text-primary">{title}</span>{' '}
-                <span className="text-primary">{member.province}</span>
-            </>
-        );
-    };
-    
-    const getFullMemberName = (member: AllianceMember) => {
-        if (!member) return null;
-        const title = getTitleNameForPride(member.pride);
-        return (
-            <>
-                {member.prideName}{' '}
-                <span className="text-sm text-muted-foreground">({title} - {member.province})</span>
-            </>
-        );
-    }
-    
-    const getFullMemberNameString = (member: AllianceMember) => {
-        if (!member) return '';
-        const title = getTitleNameForPride(member.pride);
-        return `${member.prideName} (${title} - {member.province})`;
-    }
-
-    const renderSortArrow = (key: AllianceSortKey | PlayerSortKey, type: 'alliance' | 'player') => {
-        const currentKey = type === 'alliance' ? allianceSortKey : playerSortKey;
-        const currentDirection = type === 'alliance' ? allianceSortDirection : playerSortDirection;
-        if (currentKey !== key) return null;
-        return currentDirection === 'asc' ? '▲' : '▼';
-    };
-
     // --- Memoized Calculations & Derived State ---
 
     const voteCounts = useMemo(() => {
@@ -675,6 +672,61 @@ export default function AllianceAndWorldPage() {
         }
     };
     
+    const handleSearchByCoords = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const x = parseInt(searchX, 10);
+        const y = parseInt(searchY, 10);
+        
+        if (isNaN(x) || isNaN(y)) {
+            toast({ title: "Koordinat tidak valid", variant: "destructive" });
+            return;
+        }
+
+        setIsSearching(true);
+        setSearchedAlliance(null);
+        setSearchedAllianceMembers([]);
+        setNoAllianceFound(false);
+
+        try {
+            const alliancesQuery = query(
+                collection(db, 'alliances'), 
+                where('coordinates.x', '==', x), 
+                where('coordinates.y', '==', y)
+            );
+            const allianceSnapshot = await getDocs(alliancesQuery);
+
+            if (allianceSnapshot.empty) {
+                setNoAllianceFound(true);
+                setIsSearching(false);
+                return;
+            }
+
+            const foundAllianceDoc = allianceSnapshot.docs[0];
+            const foundAlliance = { id: foundAllianceDoc.id, ...foundAllianceDoc.data() } as Omit<Alliance, 'memberCount' | 'totalPride' | 'totalLand'>;
+            setSearchedAlliance(foundAlliance);
+
+            const membersQuery = query(collection(db, 'users'), where('allianceId', '==', foundAlliance.id));
+            const membersSnapshot = await getDocs(membersQuery);
+
+            const memberList = membersSnapshot.docs.map(doc => ({
+                id: doc.id,
+                prideName: doc.data().prideName,
+                pride: doc.data().pride || 0,
+                land: doc.data().land || 0,
+                province: doc.data().province || 'N/A',
+            } as AllianceMember));
+            memberList.sort((a, b) => b.pride - a.pride);
+            setSearchedAllianceMembers(memberList);
+
+        } catch (error) {
+            console.error("Error searching alliance:", error);
+            toast({ title: "Gagal mencari aliansi", variant: "destructive" });
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+
     // --- Render Logic ---
 
     if (isLoadingMyAlliance) {
@@ -697,9 +749,10 @@ export default function AllianceAndWorldPage() {
   return (
     <div className="space-y-6">
         <Tabs defaultValue="my-alliance">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="my-alliance">Aliansiku</TabsTrigger>
                 <TabsTrigger value="world-rankings">Peringkat Dunia</TabsTrigger>
+                <TabsTrigger value="explore">Eksplorasi</TabsTrigger>
             </TabsList>
             
             {/* My Alliance Tab */}
@@ -888,6 +941,81 @@ export default function AllianceAndWorldPage() {
                     </CardContent>
                 </Card>
             </TabsContent>
+            
+            {/* Explore Tab */}
+            <TabsContent value="explore" className="space-y-6 mt-4">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Eksplorasi Dunia</CardTitle>
+                        <CardDescription>Cari aliansi berdasarkan koordinat mereka di peta dunia.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <form onSubmit={handleSearchByCoords} className="flex flex-col sm:flex-row items-center gap-4">
+                            <div className="grid w-full sm:w-auto flex-1 grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <Label htmlFor="search-x">Koordinat X</Label>
+                                    <Input id="search-x" type="number" placeholder="0" value={searchX} onChange={e => setSearchX(e.target.value)} required />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="search-y">Koordinat Y</Label>
+                                    <Input id="search-y" type="number" placeholder="0" value={searchY} onChange={e => setSearchY(e.target.value)} required />
+                                </div>
+                            </div>
+                            <Button type="submit" className="w-full sm:w-auto" disabled={isSearching}>
+                                {isSearching ? 'Mencari...' : <><Search className="h-4 w-4 mr-2" /> Cari</>}
+                            </Button>
+                        </form>
+                    </CardContent>
+                </Card>
+
+                {isSearching ? (
+                    <p className="text-center text-muted-foreground py-10">Mencari aliansi...</p>
+                ) : searchedAlliance ? (
+                    <Card>
+                        <CardHeader className="text-center">
+                            <Image src={searchedAlliance.logoUrl || 'https://placehold.co/128x128.png'} alt={`Logo ${searchedAlliance.name}`} width={80} height={80} className="mx-auto rounded-lg border shadow-md" data-ai-hint="emblem shield" />
+                            <CardTitle className="pt-2">{searchedAlliance.name}</CardTitle>
+                            <CardDescription className="font-mono">[{searchedAlliance.tag}]</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <h4 className="mb-4 text-center text-lg font-semibold">Anggota Aliansi</h4>
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Nama Pride</TableHead>
+                                        <TableHead className="text-right">Pride</TableHead>
+                                        <TableHead className="text-right">Tanah</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {searchedAllianceMembers.length > 0 ? (
+                                        searchedAllianceMembers.map(member => (
+                                            <TableRow key={member.id}>
+                                                <TableCell>{member.prideName}</TableCell>
+                                                <TableCell className="text-right">{member.pride.toLocaleString()}</TableCell>
+                                                <TableCell className="text-right">{member.land.toLocaleString()}</TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={3} className="text-center">Aliansi ini tidak memiliki anggota.</TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </CardContent>
+                    </Card>
+                ) : noAllianceFound ? (
+                    <Alert>
+                        <Landmark className="h-4 w-4" />
+                        <AlertTitle>Tidak Ditemukan</AlertTitle>
+                        <AlertDescription>
+                            Tidak ada aliansi yang ditemukan di koordinat ({searchX}, {searchY}).
+                        </AlertDescription>
+                    </Alert>
+                ) : null}
+            </TabsContent>
+
         </Tabs>
 
       <Dialog open={isAidDialogOpen} onOpenChange={setIsAidDialogOpen}>
