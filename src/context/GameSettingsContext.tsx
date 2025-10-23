@@ -2,9 +2,8 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { useAuth } from './AuthContext';
 
 // --- Interfaces for Game Settings ---
 
@@ -55,7 +54,6 @@ export interface GameTitle {
   name: string;
   prideRequired: number;
   attackBonus: number;
-
   defenseBonus: number;
   resourceBonus: number;
 }
@@ -118,72 +116,43 @@ const GameSettingsContext = createContext<GameSettingsContextType>({
 });
 
 export function GameSettingsProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
   const [settings, setSettings] = useState<GameSettings>(defaultSettings);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Only fetch settings if a user is logged in
-    if (!user) {
-        setIsLoading(false);
-        // Optionally reset to default settings on logout
-        // setSettings(defaultSettings); 
-        return;
-    }
-
-    const fetchGameSettings = async () => {
-      setIsLoading(true);
-      try {
-        const settingsCollectionRef = collection(db, 'game-settings');
-        const snapshot = await getDocs(settingsCollectionRef);
-        const fetchedSettings: Partial<GameSettings> = {};
+    const settingsCollectionRef = collection(db, 'game-settings');
+    
+    const unsubscribe = onSnapshot(settingsCollectionRef, (snapshot) => {
+        setIsLoading(true);
+        const fetchedSettings: { [key: string]: any } = {};
         
         snapshot.forEach(doc => {
-            const data = doc.data();
-            switch (doc.id) {
-                case 'initial-resources':
-                    fetchedSettings.initialResources = data as GameSettings['initialResources'];
-                    break;
-                case 'global-bonuses':
-                    fetchedSettings.globalBonuses = data as GameSettings['globalBonuses'];
-                    break;
-                case 'game-costs':
-                    fetchedSettings.costs = data as GameSettings['costs'];
-                    break;
-                case 'timing-rules':
-                    fetchedSettings.timing = {
-                        constructionTime: data.constructionTimeInHours,
-                        trainingTime: data.trainingTimeInHours,
-                    };
-                    break;
-                case 'building-effects':
-                    fetchedSettings.effects = data as GameSettings['effects'];
-                    break;
-                case 'game-mechanics':
-                    fetchedSettings.mechanics = data as GameSettings['mechanics'];
-                    break;
-                case 'admin-info':
-                    fetchedSettings.adminMessage = data.message as GameSettings['adminMessage'];
-                    break;
-            }
+            fetchedSettings[doc.id] = doc.data();
         });
-        
-        // Merge fetched settings with defaults to ensure all keys are present
-        setSettings(prev => ({
-            ...prev,
-            ...fetchedSettings
-        }));
-        
-      } catch (error) {
-        console.error("Failed to fetch game settings:", error);
-        // In case of error, we can rely on the default settings
-      } finally {
-        setIsLoading(false);
-      }
-    };
 
-    fetchGameSettings();
-  }, [user]);
+        setSettings(prev => {
+            const newSettings = { ...prev };
+            if (fetchedSettings['initial-resources']) newSettings.initialResources = fetchedSettings['initial-resources'];
+            if (fetchedSettings['global-bonuses']) newSettings.globalBonuses = fetchedSettings['global-bonuses'];
+            if (fetchedSettings['game-costs']) newSettings.costs = fetchedSettings['game-costs'];
+            if (fetchedSettings['timing-rules']) newSettings.timing = {
+                constructionTime: fetchedSettings['timing-rules'].constructionTimeInHours,
+                trainingTime: fetchedSettings['timing-rules'].trainingTimeInHours,
+            };
+            if (fetchedSettings['building-effects']) newSettings.effects = fetchedSettings['building-effects'];
+            if (fetchedSettings['game-mechanics']) newSettings.mechanics = fetchedSettings['game-mechanics'];
+            if (fetchedSettings['admin-info']) newSettings.adminMessage = fetchedSettings['admin-info'].message;
+            return newSettings;
+        });
+
+        setIsLoading(false);
+    }, (error) => {
+        console.error("Failed to fetch game settings in real-time:", error);
+        setIsLoading(false); // Stop loading even if there's an error
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const value = { settings, isLoading, setSettings };
 

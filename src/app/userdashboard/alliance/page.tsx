@@ -939,7 +939,6 @@ export default function AllianceAndWorldPage() {
                                     <TableRow>
                                         <TableHead className="w-[50px]">#</TableHead>
                                         <TableHead>Aliansi</TableHead>
-                                        <TableHead>Koordinat</TableHead>
                                         <TableHead className="text-center"><Button variant="ghost" onClick={() => handleAllianceSort('memberCount')}><Users className="h-4 w-4 mr-2" />Anggota {renderSortArrow('memberCount', 'alliance')}</Button></TableHead>
                                         <TableHead className="text-right"><Button variant="ghost" onClick={() => handleAllianceSort('totalPride')}><Crown className="h-4 w-4 mr-2" />Total Pride {renderSortArrow('totalPride', 'alliance')}</Button></TableHead>
                                         <TableHead className="text-right"><Button variant="ghost" onClick={() => handleAllianceSort('totalLand')}><MapIcon className="h-4 w-4 mr-2" />Total Tanah {renderSortArrow('totalLand', 'alliance')}</Button></TableHead>
@@ -952,9 +951,6 @@ export default function AllianceAndWorldPage() {
                                             <TableCell className="flex items-center gap-3">
                                                 <Image src={alliance.logoUrl || 'https://placehold.co/64x64.png'} alt={`Logo ${alliance.name}`} width={40} height={40} className="rounded-md border" data-ai-hint="emblem shield"/>
                                                 <div><p className="font-medium">{alliance.name}</p><p className="text-sm text-muted-foreground font-mono">[{alliance.tag}]</p></div>
-                                            </TableCell>
-                                            <TableCell>
-                                              <span className='font-mono flex items-center gap-1'><MapPin className="h-3 w-3" />({alliance.coordinates.x}, {alliance.coordinates.y})</span>
                                             </TableCell>
                                             <TableCell className="text-center">{alliance.memberCount}</TableCell>
                                             <TableCell className="text-right">{(alliance.totalPride || 0).toLocaleString()}</TableCell>
@@ -975,6 +971,7 @@ export default function AllianceAndWorldPage() {
                                     <TableRow>
                                         <TableHead className="w-[50px]">#</TableHead>
                                         <TableHead>Nama Pride</TableHead>
+                                        <TableHead>Aliansi</TableHead>
                                         <TableHead className="text-right"><Button variant="ghost" onClick={() => handlePlayerSort('pride')}><Crown className="h-4 w-4 mr-2" />Pride {renderSortArrow('pride', 'player')}</Button></TableHead>
                                         <TableHead className="text-right"><Button variant="ghost" onClick={() => handlePlayerSort('land')}><MapIcon className="h-4 w-4 mr-2" />Tanah {renderSortArrow('land', 'player')}</Button></TableHead>
                                     </TableRow>
@@ -983,10 +980,8 @@ export default function AllianceAndWorldPage() {
                                     {sortedPlayers.map((player, index) => (
                                         <TableRow key={player.id}>
                                             <TableCell>{index + 1}</TableCell>
-                                            <TableCell className="font-medium">
-                                                {getTitleNameForPride(player.pride)} - {player.prideName} ({player.province})
-                                                <p className="text-sm text-muted-foreground">{player.allianceName}</p>
-                                            </TableCell>
+                                            <TableCell className="font-medium">{player.prideName} ({player.province})</TableCell>
+                                            <TableCell>{player.allianceName}</TableCell>
                                             <TableCell className="text-right">{(player.pride || 0).toLocaleString()}</TableCell>
                                             <TableCell className="text-right">{(player.land || 0).toLocaleString()}</TableCell>
                                         </TableRow>

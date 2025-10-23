@@ -75,6 +75,14 @@ const buildingNameMap: { [key: string]: string } = {
   tambang: 'Tambang'
 };
 
+const unitNameMap: { [key: string]: string } = {
+  attack: 'Pasukan Serang',
+  defense: 'Pasukan Bertahan',
+  elite: 'Pasukan Elit',
+  raider: 'Perampok',
+  spy: 'Mata-mata'
+};
+
 const effectNameMap: { [key: string]: string } = {
   unemployed: 'Pengangguran Dihasilkan',
   capacity: 'Kapasitas Maksimal',
