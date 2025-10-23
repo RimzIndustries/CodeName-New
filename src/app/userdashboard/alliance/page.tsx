@@ -180,6 +180,8 @@ export default function AllianceAndWorldPage() {
     const [searchedAlliance, setSearchedAlliance] = useState<Omit<Alliance, 'memberCount' | 'totalPride' | 'totalLand'> | null>(null);
     const [searchedAllianceMembers, setSearchedAllianceMembers] = useState<AllianceMember[]>([]);
     const [noAllianceFound, setNoAllianceFound] = useState(false);
+    const [searchedAllianceVotes, setSearchedAllianceVotes] = useState<Vote[]>([]);
+    const [searchedAllianceLeaderId, setSearchedAllianceLeaderId] = useState<string | null>(null);
 
 
     // --- Helper Functions ---
@@ -206,9 +208,9 @@ export default function AllianceAndWorldPage() {
         return `${member.prideName} (${title} - {member.province})`;
     }
 
-    const getMemberJabatan = (member: AllianceMember) => {
-        if (!member) return '';
-        return member.id === leaderId ? 'Pemimpin' : 'Anggota';
+    const getMemberJabatan = (memberId: string, leaderId: string | null) => {
+        if (!memberId) return '';
+        return memberId === leaderId ? 'Pemimpin' : 'Anggota';
     };
 
     const renderSortArrow = (key: AllianceSortKey | PlayerSortKey, type: 'alliance' | 'player') => {
@@ -428,6 +430,40 @@ export default function AllianceAndWorldPage() {
           setLeaderId(null);
       }
     }, [voteCounts, members, votingPowerDivisor]);
+    
+    const searchedAllianceVoteCounts = useMemo(() => {
+        const counts: { [key: string]: number } = {};
+        for (const vote of searchedAllianceVotes) {
+            const voter = searchedAllianceMembers.find(m => m.id === vote.voterId);
+            if (voter) {
+                const votingPower = Math.floor(voter.land / votingPowerDivisor);
+                counts[vote.candidateId] = (counts[vote.candidateId] || 0) + votingPower;
+            }
+        }
+        return counts;
+    }, [searchedAllianceVotes, searchedAllianceMembers, votingPowerDivisor]);
+
+    useEffect(() => {
+        const totalPossibleVotingPower = searchedAllianceMembers.reduce(
+            (acc, member) => acc + Math.floor(member.land / votingPowerDivisor),0
+        );
+  
+        if (Object.keys(searchedAllianceVoteCounts).length > 0 && totalPossibleVotingPower > 0) {
+            const sortedVotes = Object.entries(searchedAllianceVoteCounts).sort((a, b) => b[1] - a[1]);
+            const topCandidateId = sortedVotes[0][0];
+            const topCandidateVotePower = sortedVotes[0][1];
+            const isTie = sortedVotes.length > 1 && sortedVotes[0][1] === sortedVotes[1][1];
+            const hasMajority = topCandidateVotePower >= totalPossibleVotingPower * 0.5;
+    
+            if (!isTie && hasMajority) {
+                setSearchedAllianceLeaderId(topCandidateId);
+            } else {
+                setSearchedAllianceLeaderId(null);
+            }
+        } else {
+            setSearchedAllianceLeaderId(null);
+        }
+    }, [searchedAllianceVoteCounts, searchedAllianceMembers, votingPowerDivisor]);
 
     const isLeader = useMemo(() => user?.uid === leaderId, [user?.uid, leaderId]);
     const isAdmin = userProfile?.role === 'admin';
@@ -442,6 +478,12 @@ export default function AllianceAndWorldPage() {
         if (!leader) return 'Belum ada';
         return getFullMemberNameString(leader);
     }, [members, leaderId, titles]);
+    
+    const searchedLeaderDisplayName = useMemo(() => {
+        const leader = searchedAllianceMembers.find(m => m.id === searchedAllianceLeaderId);
+        if (!leader) return 'Belum ada';
+        return getFullMemberNameString(leader);
+    }, [searchedAllianceMembers, searchedAllianceLeaderId, titles]);
 
     const sortedAlliances = useMemo(() => {
         return [...allAlliances].sort((a, b) => {
@@ -691,6 +733,8 @@ export default function AllianceAndWorldPage() {
         setSearchedAlliance(null);
         setSearchedAllianceMembers([]);
         setNoAllianceFound(false);
+        setSearchedAllianceVotes([]);
+        setSearchedAllianceLeaderId(null);
 
         try {
             const alliancesQuery = query(
@@ -711,7 +755,15 @@ export default function AllianceAndWorldPage() {
             setSearchedAlliance(foundAlliance);
 
             const membersQuery = query(collection(db, 'users'), where('allianceId', '==', foundAlliance.id));
-            const membersSnapshot = await getDocs(membersQuery);
+            const votesQuery = query(collection(db, 'votes'), where('allianceId', '==', foundAlliance.id));
+
+            const [membersSnapshot, votesSnapshot] = await Promise.all([
+              getDocs(membersQuery),
+              getDocs(votesQuery)
+            ]);
+            
+            const voteList = votesSnapshot.docs.map(doc => ({ voterId: doc.id, ...doc.data() } as Vote));
+            setSearchedAllianceVotes(voteList);
 
             const memberList = membersSnapshot.docs.map(doc => ({
                 id: doc.id,
@@ -805,7 +857,7 @@ export default function AllianceAndWorldPage() {
                         {members.length > 0 ? members.map(member => (
                           <TableRow key={member.id}>
                               <TableCell className="flex items-center gap-2">{member.id === leaderId && <Crown className="h-4 w-4 text-yellow-500" />}{member.prideName}</TableCell>
-                              <TableCell>{getMemberJabatan(member)}</TableCell>
+                              <TableCell>{getMemberJabatan(member.id, leaderId)}</TableCell>
                               <TableCell className="text-right">{member.land.toLocaleString()}</TableCell>
                               <TableCell className="text-right">{(voteCounts[member.id] || 0).toLocaleString()}</TableCell>
                               <TableCell className="text-right">{Math.floor(member.land / votingPowerDivisor).toLocaleString()}</TableCell>
@@ -977,10 +1029,11 @@ export default function AllianceAndWorldPage() {
                     <p className="text-center text-muted-foreground py-10">Mencari aliansi...</p>
                 ) : searchedAlliance ? (
                     <Card>
-                        <CardHeader className="text-center">
+                        <CardHeader className="text-center space-y-2">
                             <Image src={searchedAlliance.logoUrl || 'https://placehold.co/128x128.png'} alt={`Logo ${searchedAlliance.name}`} width={80} height={80} className="mx-auto rounded-lg border shadow-md" data-ai-hint="emblem shield" />
                             <CardTitle className="pt-2">{searchedAlliance.name}</CardTitle>
                             <CardDescription className="font-mono">[{searchedAlliance.tag}]</CardDescription>
+                             <p className="text-sm text-primary pt-2">Pemimpin: <span>{searchedLeaderDisplayName}</span></p>
                         </CardHeader>
                         <CardContent>
                             <h4 className="mb-4 text-center text-lg font-semibold">Anggota Aliansi</h4>
@@ -988,6 +1041,7 @@ export default function AllianceAndWorldPage() {
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Nama Pride</TableHead>
+                                        <TableHead>Jabatan</TableHead>
                                         <TableHead className="text-right">Pride</TableHead>
                                         <TableHead className="text-right">Tanah</TableHead>
                                     </TableRow>
@@ -996,14 +1050,15 @@ export default function AllianceAndWorldPage() {
                                     {searchedAllianceMembers.length > 0 ? (
                                         searchedAllianceMembers.map(member => (
                                             <TableRow key={member.id}>
-                                                <TableCell>{member.prideName}</TableCell>
+                                                <TableCell className="flex items-center gap-2">{member.id === searchedAllianceLeaderId && <Crown className="h-4 w-4 text-yellow-500" />}{member.prideName}</TableCell>
+                                                <TableCell>{getMemberJabatan(member.id, searchedAllianceLeaderId)}</TableCell>
                                                 <TableCell className="text-right">{member.pride.toLocaleString()}</TableCell>
                                                 <TableCell className="text-right">{member.land.toLocaleString()}</TableCell>
                                             </TableRow>
                                         ))
                                     ) : (
                                         <TableRow>
-                                            <TableCell colSpan={3} className="text-center">Aliansi ini tidak memiliki anggota.</TableCell>
+                                            <TableCell colSpan={4} className="text-center">Aliansi ini tidak memiliki anggota.</TableCell>
                                         </TableRow>
                                     )}
                                 </TableBody>
