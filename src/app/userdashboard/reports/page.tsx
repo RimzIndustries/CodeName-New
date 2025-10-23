@@ -6,7 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Shield, Swords, ShieldOff, Skull, Tent, Coins, Eye, MapPin, Crown } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, updateDoc, doc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
@@ -46,6 +46,16 @@ const unitNameMap: { [key: string]: string } = {
   spy: 'Mata-mata'
 };
 
+const buildingNameMap: { [key: string]: string } = {
+  residence: 'Rumah',
+  farm: 'Sawah',
+  fort: 'Benteng',
+  university: 'Kampus',
+  barracks: 'Barak Pasukan',
+  mobility: 'Mobilitas Pasukan',
+  tambang: 'Tambang'
+};
+
 
 export default function ReportsPage() {
     const { user } = useAuth();
@@ -62,7 +72,8 @@ export default function ReportsPage() {
         setIsLoading(true);
         const reportsQuery = query(
             collection(db, 'reports'), 
-            where('involvedUsers', 'array-contains', user.uid)
+            where('involvedUsers', 'array-contains', user.uid),
+            orderBy('timestamp', 'desc')
         );
 
         const unsubscribe = onSnapshot(reportsQuery, (snapshot) => {
@@ -71,9 +82,28 @@ export default function ReportsPage() {
                 const data = doc.data();
                 const report: Partial<Report> = { id: doc.id };
 
+                // Determine the user's role in this specific report
+                const isAttacker = data.attackerId === user.uid;
+
                 if (data.type === 'attack') {
-                    report.type = data.attackerId === user.uid ? 'attack' : 'defense';
-                    report.outcome = report.type === 'attack' ? data.outcomeForAttacker : (data.outcomeForAttacker === 'win' ? 'loss' : 'win');
+                    report.type = isAttacker ? 'attack' : 'defense';
+                    report.outcome = isAttacker ? data.outcomeForAttacker : (data.outcomeForAttacker === 'win' ? 'loss' : 'win');
+                } else if (data.type === 'spy') {
+                    report.type = 'spy-sent';
+                    report.outcome = data.outcomeForAttacker;
+                } else if (data.type === 'spy-received') {
+                    report.type = 'spy-received';
+                    report.outcome = data.outcomeForAttacker;
+                }
+
+                // Common fields
+                report.attackerName = data.attackerName;
+                report.defenderName = data.defenderName;
+                report.timestamp = data.timestamp;
+                report.isRead = data.readBy?.[user.uid] ?? false;
+
+                // Fields specific to attack/defense reports
+                if (data.type === 'attack') {
                     report.unitsLostAttacker = data.unitsLostAttacker;
                     report.unitsLostDefender = data.unitsLostDefender;
                     report.resourcesPlundered = data.resourcesPlundered;
@@ -81,27 +111,17 @@ export default function ReportsPage() {
                     report.prideStolen = data.prideStolen;
                     report.attackerPower = data.attackerPower;
                     report.defenderPower = data.defenderPower;
-                } else if (data.type === 'spy' || data.type === 'spy-received') {
-                    report.type = data.attackerId === user.uid ? 'spy-sent' : 'spy-received';
-                    report.outcome = data.outcomeForAttacker;
-                    if (report.outcome === 'success' && report.type === 'spy-sent') {
-                        report.intel = data.intel;
-                    }
+                }
+
+                // Fields specific to successful spy-sent reports
+                if (report.type === 'spy-sent' && report.outcome === 'success') {
+                    report.intel = data.intel;
                 }
                 
-                report.attackerName = data.attackerName;
-                report.defenderName = data.defenderName;
-                report.timestamp = data.timestamp;
-                report.isRead = data.readBy?.[user.uid] ?? false;
-
-                reportList.push(report as Report);
-            });
-            
-            // Sort reports on the client-side
-            reportList.sort((a, b) => {
-                const timeA = a.timestamp?.toDate() ?? 0;
-                const timeB = b.timestamp?.toDate() ?? 0;
-                return timeB - timeA;
+                // Only push if type is determined
+                if (report.type) {
+                    reportList.push(report as Report);
+                }
             });
             
             setReports(reportList);
@@ -141,6 +161,19 @@ export default function ReportsPage() {
       return formatDistanceToNow(timestamp.toDate(), { addSuffix: true, locale: id });
     }
 
+    const markAsRead = async (reportId: string) => {
+        if (!user) return;
+        const reportRef = doc(db, 'reports', reportId);
+        try {
+            await updateDoc(reportRef, {
+                [`readBy.${user.uid}`]: true
+            });
+        } catch (error) {
+            console.error("Error marking report as read:", error);
+        }
+    };
+
+
   return (
     <div className="space-y-4">
         <Card>
@@ -177,12 +210,12 @@ export default function ReportsPage() {
                     
                     return (
                         <AccordionItem value={report.id} key={report.id} className="border bg-card rounded-md">
-                            <AccordionTrigger className="p-4 hover:no-underline">
+                            <AccordionTrigger className="p-4 hover:no-underline" onClick={() => markAsRead(report.id)}>
                                 <div className="flex items-center justify-between w-full">
                                     <div className="flex items-center gap-3 text-left">
                                         <div className={outcomeDetails.color}>{outcomeDetails.icon}</div>
                                         <div className="flex flex-col">
-                                            <span className="font-medium">{title}</span>
+                                            <span className={`font-medium ${!report.isRead ? 'font-bold' : ''}`}>{title}</span>
                                             <span className="text-xs text-muted-foreground">{formatTimestamp(report.timestamp)}</span>
                                         </div>
                                     </div>
@@ -197,7 +230,7 @@ export default function ReportsPage() {
                                     <div className="space-y-2">
                                         <h4 className="font-semibold text-red-500">Pasukan Anda yang Hilang</h4>
                                         <div className="p-2 border rounded-md bg-muted/50 text-xs space-y-1">
-                                            {report.unitsLostAttacker && Object.values(isSender ? report.unitsLostAttacker : report.unitsLostDefender!).reduce((a,b) => a+b, 0) > 0 ? Object.entries(isSender ? report.unitsLostAttacker : report.unitsLostDefender!).map(([unit, count]) => (
+                                            {Object.values(isSender ? report.unitsLostAttacker! : report.unitsLostDefender!).reduce((a,b) => a+b, 0) > 0 ? Object.entries(isSender ? report.unitsLostAttacker! : report.unitsLostDefender!).map(([unit, count]) => (
                                                 <div key={unit} className="flex justify-between">
                                                     <span>{unitNameMap[unit] || unit}:</span>
                                                     <span>{count.toLocaleString()}</span>
@@ -206,7 +239,7 @@ export default function ReportsPage() {
                                         </div>
                                          <h4 className="font-semibold text-blue-500">Pasukan Musuh yang Hilang</h4>
                                         <div className="p-2 border rounded-md bg-muted/50 text-xs space-y-1">
-                                            {report.unitsLostDefender && Object.values(isSender ? report.unitsLostDefender : report.unitsLostAttacker!).reduce((a,b) => a+b, 0) > 0 ? Object.entries(isSender ? report.unitsLostDefender : report.unitsLostAttacker!).map(([unit, count]) => (
+                                            {Object.values(isSender ? report.unitsLostDefender! : report.unitsLostAttacker!).reduce((a,b) => a+b, 0) > 0 ? Object.entries(isSender ? report.unitsLostDefender! : report.unitsLostAttacker!).map(([unit, count]) => (
                                                 <div key={unit} className="flex justify-between">
                                                     <span>{unitNameMap[unit] || unit}:</span>
                                                     <span>{count.toLocaleString()}</span>
@@ -217,11 +250,11 @@ export default function ReportsPage() {
                                     <div className="space-y-2">
                                         <div className="space-y-1">
                                              <div className="flex justify-between items-center text-xs">
-                                                <span className="font-semibold flex items-center gap-1"><Swords className="h-3 w-3" /> Kekuatan Serang Anda:</span>
+                                                <span className="font-semibold flex items-center gap-1"><Swords className="h-3 w-3" /> Kekuatan Anda:</span>
                                                 <span>{yourPower?.toLocaleString() ?? 'N/A'}</span>
                                             </div>
                                             <div className="flex justify-between items-center text-xs">
-                                                <span className="font-semibold flex items-center gap-1"><Shield className="h-3 w-3" /> Kekuatan Bertahan Musuh:</span>
+                                                <span className="font-semibold flex items-center gap-1"><Shield className="h-3 w-3" /> Kekuatan Musuh:</span>
                                                 <span>{enemyPower?.toLocaleString() ?? 'N/A'}</span>
                                             </div>
                                         </div>
@@ -229,28 +262,28 @@ export default function ReportsPage() {
                                             <div>
                                                 <h4 className="font-semibold text-yellow-500 flex items-center gap-2 mt-2"><Coins className="h-4 w-4" /> Hasil Jarahan</h4>
                                                 <div className="p-2 border rounded-md bg-muted/50 text-xs space-y-1">
-                                                    {report.resourcesPlundered?.money > 0 && (
+                                                    {report.resourcesPlundered?.money! > 0 && (
                                                         <div className="flex justify-between">
                                                             <span>Uang:</span>
-                                                            <span>{report.resourcesPlundered.money.toLocaleString()} uFtB</span>
+                                                            <span>{report.resourcesPlundered!.money.toLocaleString()} uFtB</span>
                                                         </div>
                                                     )}
-                                                    {report.resourcesPlundered?.food > 0 && (
+                                                    {report.resourcesPlundered?.food! > 0 && (
                                                         <div className="flex justify-between">
                                                             <span>Makanan:</span>
-                                                            <span>{report.resourcesPlundered.food.toLocaleString()} mFtB</span>
+                                                            <span>{report.resourcesPlundered!.food.toLocaleString()} mFtB</span>
                                                         </div>
                                                     )}
-                                                    {report.landStolen > 0 && (
+                                                    {report.landStolen! > 0 && (
                                                         <div className="flex justify-between items-center">
                                                             <span className="flex items-center gap-1"><MapPin className="h-3 w-3"/>Tanah:</span>
-                                                            <span>{report.landStolen.toLocaleString()} tFtB</span>
+                                                            <span>{report.landStolen!.toLocaleString()} tFtB</span>
                                                         </div>
                                                     )}
-                                                    {report.prideStolen > 0 && (
+                                                    {report.prideStolen! > 0 && (
                                                         <div className="flex justify-between items-center">
                                                             <span className="flex items-center gap-1"><Crown className="h-3 w-3"/>Pride:</span>
-                                                            <span>{report.prideStolen.toLocaleString()}</span>
+                                                            <span>{report.prideStolen!.toLocaleString()}</span>
                                                         </div>
                                                     )}
                                                 </div>
@@ -272,10 +305,17 @@ export default function ReportsPage() {
                                                 <span>{count.toLocaleString()}</span>
                                             </div>
                                         ))}
+                                         <h5 className="font-medium pt-2">Bangunan:</h5>
+                                        {Object.entries(report.intel.buildings).map(([building, count]) => (
+                                             <div key={building} className="flex justify-between pl-2">
+                                                <span>{buildingNameMap[building] || building}:</span>
+                                                <span>{count.toLocaleString()}</span>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                                ) : (
-                                <p className="text-muted-foreground">{report.type === 'spy-sent' && report.outcome === 'failure' ? 'Mata-mata Anda gagal menyusup dan tidak kembali.' : 'Anda diserang oleh mata-mata musuh.'}</p>
+                                <p className="text-muted-foreground">{report.type === 'spy-sent' && report.outcome === 'failure' ? 'Mata-mata Anda gagal menyusup dan tidak kembali.' : 'Anda diserang oleh mata-mata musuh. Tidak ada informasi yang dicuri.'}</p>
                                )}
                             </AccordionContent>
                         </AccordionItem>
@@ -286,3 +326,5 @@ export default function ReportsPage() {
     </div>
   );
 }
+
+    
