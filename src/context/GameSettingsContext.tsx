@@ -2,7 +2,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { collection, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 // --- Interfaces for Game Settings ---
@@ -131,7 +131,7 @@ export function GameSettingsProvider({ children }: { children: ReactNode }) {
         });
 
         setSettings(prev => {
-            const newSettings = { ...prev };
+            const newSettings = { ...defaultSettings, ...prev };
             if (fetchedSettings['initial-resources']) newSettings.initialResources = fetchedSettings['initial-resources'];
             if (fetchedSettings['global-bonuses']) newSettings.globalBonuses = fetchedSettings['global-bonuses'];
             if (fetchedSettings['game-costs']) newSettings.costs = fetchedSettings['game-costs'];

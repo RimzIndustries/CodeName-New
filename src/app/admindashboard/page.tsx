@@ -173,10 +173,13 @@ export default function AdminDashboardPage() {
 
   const handleSettingChange = (category: string, key: string, value: any, subkey?: string) => {
     setLocalSettings(prev => {
-      const newSettings = { ...prev };
+      const newSettings = JSON.parse(JSON.stringify(prev)); // deep copy
       if (subkey) {
+        if (!newSettings[category]) newSettings[category] = {};
+        if (!newSettings[category][key]) newSettings[category][key] = {};
         (newSettings as any)[category][key][subkey] = value;
       } else {
+        if (!newSettings[category]) newSettings[category] = {};
         (newSettings as any)[category][key] = value;
       }
       return newSettings;
@@ -226,12 +229,8 @@ export default function AdminDashboardPage() {
             setIsLoadingUsers(false);
         }
         
-        // Admin Message
-        getDoc(doc(db, 'game-settings', 'admin-info')).then(docSnap => {
-            if (docSnap.exists()) {
-                setAdminMessage(docSnap.data().message ?? '');
-            }
-        });
+        // Admin Message - now from context
+        setAdminMessage(settings.adminMessage);
         
         // Titles
         setIsLoadingTitles(true);
@@ -302,7 +301,7 @@ export default function AdminDashboardPage() {
     };
 
     fetchData();
-  }, [userProfile?.role, toast]);
+  }, [userProfile?.role, toast, settings.adminMessage]);
   
   // Calculate rankings
   useEffect(() => {
@@ -373,14 +372,7 @@ export default function AdminDashboardPage() {
     const docRef = doc(db, 'game-settings', docName);
     try {
         await setDoc(docRef, data, { merge: true });
-        // After successful save, update the main context state
-        if (docName === 'initial-resources') setSettings(prev => ({ ...prev, initialResources: { ...prev.initialResources, ...data } }));
-        if (docName === 'global-bonuses') setSettings(prev => ({ ...prev, globalBonuses: { ...prev.globalBonuses, ...data } }));
-        if (docName === 'game-costs') setSettings(prev => ({ ...prev, costs: { ...prev.costs, ...data } }));
-        if (docName === 'timing-rules') setSettings(prev => ({ ...prev, timing: { ...prev.timing, ...data } }));
-        if (docName === 'building-effects') setSettings(prev => ({ ...prev, effects: { ...prev.effects, ...data } }));
-        if (docName === 'game-mechanics') setSettings(prev => ({ ...prev, mechanics: { ...prev.mechanics, ...data } }));
-
+        // Context will update automatically, no need for manual setSettings calls
         toast({
             title: toastTitle,
             description: "Pengaturan permainan telah berhasil disimpan.",
@@ -412,7 +404,7 @@ export default function AdminDashboardPage() {
 
     try {
         await setDoc(costsDocRef, data, { merge: true });
-        setSettings(prev => ({...prev, costs: data }));
+        // Context will update automatically
         toast({
             title: "Biaya Diperbarui",
             description: "Biaya dasar untuk unit dan bangunan telah disimpan.",
@@ -868,24 +860,7 @@ export default function AdminDashboardPage() {
 
         if (changesMade) {
             await batch.commit();
-            // The context will auto-update, so we just need to re-sync local form state
-            setLocalSettings(prev => {
-                const newSettings = JSON.parse(JSON.stringify(prev)); // Deep copy
-                if(suggestedChanges.initialResources) Object.assign(newSettings.initialResources, suggestedChanges.initialResources);
-                if(suggestedChanges.globalBonuses) Object.assign(newSettings.globalBonuses, suggestedChanges.globalBonuses);
-                if(suggestedChanges.costs?.units) Object.assign(newSettings.costs.units, suggestedChanges.costs.units);
-                if(suggestedChanges.costs?.buildings) Object.assign(newSettings.costs.buildings, suggestedChanges.costs.buildings);
-                if(suggestedChanges.timing?.constructionTime !== undefined) newSettings.timing.constructionTime = suggestedChanges.timing.constructionTime;
-                if(suggestedChanges.timing?.trainingTime !== undefined) newSettings.timing.trainingTime = suggestedChanges.timing.trainingTime;
-                if(suggestedChanges.effects) {
-                     for (const [building, effectChanges] of Object.entries(suggestedChanges.effects!)) {
-                        if (!newSettings.effects[building]) newSettings.effects[building] = {};
-                        Object.assign(newSettings.effects[building], effectChanges);
-                    }
-                }
-                if(suggestedChanges.mechanics?.votingPowerDivisor !== undefined) newSettings.mechanics.votingPowerDivisor = suggestedChanges.mechanics.votingPowerDivisor;
-                return newSettings;
-            });
+            // The context will auto-update, no need to manually set anything
             toast({ title: "Perubahan Diterapkan", description: "Pengaturan permainan telah diperbarui sesuai saran AI." });
         } else {
              toast({ title: "Tidak ada perubahan", description: "AI tidak menyarankan perubahan terstruktur apa pun." });

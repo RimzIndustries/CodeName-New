@@ -318,10 +318,15 @@ export default function AllianceAndWorldPage() {
         setIsLoadingWorld(true);
         const fetchData = async () => {
             try {
-                const [alliancesSnapshot, usersSnapshot] = await Promise.all([
+                const [alliancesSnapshot, usersSnapshot, titlesSnapshot] = await Promise.all([
                     getDocs(collection(db, 'alliances')),
-                    getDocs(collection(db, 'users'))
+                    getDocs(collection(db, 'users')),
+                    getDocs(collection(db, 'titles'))
                 ]);
+                
+                const titlesList = titlesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as GameTitle[];
+                titlesList.sort((a, b) => a.prideRequired - b.prideRequired);
+                setTitles(titlesList);
 
                 const allianceMap = new Map<string, {name: string, tag: string}>();
                 alliancesSnapshot.forEach(doc => {
