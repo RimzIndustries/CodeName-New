@@ -20,6 +20,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { differenceInSeconds } from 'date-fns';
+import { useGameSettings, type GameTitle } from '@/context/GameSettingsContext';
 
 // --- Interfaces ---
 
@@ -56,12 +57,6 @@ interface Player {
     pride: number;
     land: number;
     province: string;
-}
-
-interface GameTitle {
-  id: string;
-  name: string;
-  prideRequired: number;
 }
 
 interface TransportJob {
@@ -134,6 +129,7 @@ function TransportCountdown({ arrivalTime }: { arrivalTime: Timestamp }) {
 
 export default function AllianceAndWorldPage() {
     const { user, userProfile } = useAuth();
+    const { settings, isLoading: isLoadingSettings } = useGameSettings();
     const { toast } = useToast();
 
     // --- State for My Alliance Tab ---
@@ -144,7 +140,6 @@ export default function AllianceAndWorldPage() {
     const [selectedCandidate, setSelectedCandidate] = useState<string>('');
     const [isVoting, setIsVoting] = useState(false);
     const [isLoadingMyAlliance, setIsLoadingMyAlliance] = useState(true);
-    const [votingPowerDivisor, setVotingPowerDivisor] = useState(100);
     const [leaderId, setLeaderId] = useState<string | null>(null);
     const [newAllianceName, setNewAllianceName] = useState('');
     const [newAllianceTag, setNewAllianceTag] = useState('');
@@ -224,18 +219,12 @@ export default function AllianceAndWorldPage() {
 
     // Fetch data for "My Alliance" tab
     useEffect(() => {
-        // Fetch static data like titles and mechanics once
+        // Fetch static data like titles once
         const titlesCollectionRef = collection(db, 'titles');
         onSnapshot(titlesCollectionRef, (snapshot) => {
             const titlesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as GameTitle[];
             titlesList.sort((a, b) => a.prideRequired - b.prideRequired);
             setTitles(titlesList);
-        });
-        
-        getDoc(doc(db, 'game-settings', 'game-mechanics')).then(docSnap => {
-            if (docSnap.exists() && docSnap.data().votingPowerDivisor) {
-                setVotingPowerDivisor(docSnap.data().votingPowerDivisor);
-            }
         });
 
         // If user is not in an alliance, stop loading and return
@@ -403,16 +392,16 @@ export default function AllianceAndWorldPage() {
         for (const vote of votes) {
             const voter = members.find(m => m.id === vote.voterId);
             if (voter) {
-                const votingPower = Math.floor(voter.land / votingPowerDivisor);
+                const votingPower = Math.floor(voter.land / settings.mechanics.votingPowerDivisor);
                 counts[vote.candidateId] = (counts[vote.candidateId] || 0) + votingPower;
             }
         }
         return counts;
-    }, [votes, members, votingPowerDivisor]);
+    }, [votes, members, settings.mechanics.votingPowerDivisor]);
 
     useEffect(() => {
       const totalPossibleVotingPower = members.reduce(
-        (acc, member) => acc + Math.floor(member.land / votingPowerDivisor),
+        (acc, member) => acc + Math.floor(member.land / settings.mechanics.votingPowerDivisor),
         0
       );
   
@@ -431,23 +420,23 @@ export default function AllianceAndWorldPage() {
       } else {
           setLeaderId(null);
       }
-    }, [voteCounts, members, votingPowerDivisor]);
+    }, [voteCounts, members, settings.mechanics.votingPowerDivisor]);
     
     const searchedAllianceVoteCounts = useMemo(() => {
         const counts: { [key: string]: number } = {};
         for (const vote of searchedAllianceVotes) {
             const voter = searchedAllianceMembers.find(m => m.id === vote.voterId);
             if (voter) {
-                const votingPower = Math.floor(voter.land / votingPowerDivisor);
+                const votingPower = Math.floor(voter.land / settings.mechanics.votingPowerDivisor);
                 counts[vote.candidateId] = (counts[vote.candidateId] || 0) + votingPower;
             }
         }
         return counts;
-    }, [searchedAllianceVotes, searchedAllianceMembers, votingPowerDivisor]);
+    }, [searchedAllianceVotes, searchedAllianceMembers, settings.mechanics.votingPowerDivisor]);
 
     useEffect(() => {
         const totalPossibleVotingPower = searchedAllianceMembers.reduce(
-            (acc, member) => acc + Math.floor(member.land / votingPowerDivisor),0
+            (acc, member) => acc + Math.floor(member.land / settings.mechanics.votingPowerDivisor),0
         );
   
         if (Object.keys(searchedAllianceVoteCounts).length > 0 && totalPossibleVotingPower > 0) {
@@ -465,7 +454,7 @@ export default function AllianceAndWorldPage() {
         } else {
             setSearchedAllianceLeaderId(null);
         }
-    }, [searchedAllianceVoteCounts, searchedAllianceMembers, votingPowerDivisor]);
+    }, [searchedAllianceVoteCounts, searchedAllianceMembers, settings.mechanics.votingPowerDivisor]);
 
     const isLeader = useMemo(() => user?.uid === leaderId, [user?.uid, leaderId]);
     const isAdmin = userProfile?.role === 'admin';
@@ -788,7 +777,7 @@ export default function AllianceAndWorldPage() {
 
     // --- Render Logic ---
 
-    if (isLoadingMyAlliance) {
+    if (isLoadingMyAlliance || isLoadingSettings) {
         return <Card><CardContent className="p-6 text-center">Memuat data aliansi...</CardContent></Card>
     }
 
@@ -862,7 +851,7 @@ export default function AllianceAndWorldPage() {
                               <TableCell>{getMemberJabatan(member.id, leaderId)}</TableCell>
                               <TableCell className="text-right">{member.land.toLocaleString()}</TableCell>
                               <TableCell className="text-right">{(voteCounts[member.id] || 0).toLocaleString()}</TableCell>
-                              <TableCell className="text-right">{Math.floor(member.land / votingPowerDivisor).toLocaleString()}</TableCell>
+                              <TableCell className="text-right">{Math.floor(member.land / settings.mechanics.votingPowerDivisor).toLocaleString()}</TableCell>
                               <TableCell className="text-right">{member.id !== user?.uid && (<Button variant="outline" size="sm" onClick={() => openAidDialog(member)}>Bantuan</Button>)}</TableCell>
                           </TableRow>
                         )) : <TableRow><TableCell colSpan={6} className="text-center">Tidak ada anggota.</TableCell></TableRow>}

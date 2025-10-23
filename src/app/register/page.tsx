@@ -11,10 +11,11 @@ import { ModeToggle } from '@/components/theme-toggle';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, getDocs, Timestamp } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs, Timestamp } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useGameSettings } from '@/context/GameSettingsContext';
 
 const zodiacSigns = [ "Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces" ];
 const provinces = [ "Aceh", "Sumatera Utara", "Sumatera Barat", "Riau", "Kepulauan Riau", "Jambi", "Bengkulu", "Sumatera Selatan", "Kepulauan Bangka Belitung", "Lampung", "Banten", "DKI Jakarta", "Jawa Barat", "Jawa Tengah", "DI Yogyakarta", "Jawa Timur", "Bali", "Nusa Tenggara Barat", "Nusa Tenggara Timur", "Kalimantan Barat", "Kalimantan Tengah", "Kalimantan Selatan", "Kalimantan Timur", "Kalimantan Utara", "Gorontalo", "Sulawesi Barat", "Sulawesi Selatan", "Sulawesi Tengah", "Sulawesi Tenggara", "Sulawesi Utara", "Maluku", "Maluku Utara", "Papua", "Papua Barat", "Papua Barat Daya", "Papua Pegunungan", "Papua Selatan", "Papua Tengah", "Luar Negeri" ];
@@ -28,6 +29,7 @@ export default function RegisterPage() {
   const [province, setProvince] = useState('');
   const router = useRouter();
   const { toast } = useToast();
+  const { settings: gameSettings, isLoading: isLoadingSettings } = useGameSettings();
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +51,11 @@ export default function RegisterPage() {
         });
         return;
     }
+    
+    if (isLoadingSettings) {
+        toast({ title: "Harap tunggu", description: "Pengaturan permainan sedang dimuat..."});
+        return;
+    }
 
     try {
       // Create user in Firebase Auth first
@@ -61,28 +68,9 @@ export default function RegisterPage() {
       // --- Prepare user data based on role ---
       let assignedAllianceId: string | null = null;
       let userCoordinates = { x: 0, y: 0 };
-      let initialMoney = 0, initialFood = 0, initialLand = 0, initialPride = 0, initialUnemployed = 0;
+      const { initialResources } = gameSettings;
 
       if (role === 'user') {
-        // Fetch initial game settings for new users
-        const settingsDocRef = doc(db, 'game-settings', 'initial-resources');
-        const settingsDocSnap = await getDoc(settingsDocRef);
-
-        if (settingsDocSnap.exists()) {
-          const settingsData = settingsDocSnap.data();
-          initialMoney = settingsData.money ?? 1000;
-          initialFood = settingsData.food ?? 500;
-          initialLand = settingsData.land ?? 100;
-          initialUnemployed = settingsData.unemployed ?? 10;
-        } else {
-          initialMoney = 1000;
-          initialFood = 500;
-          initialLand = 100;
-          initialUnemployed = 10;
-        }
-        initialPride = 500;
-        
-
         // --- New Alliance Assignment Logic ---
         const alliancesCollectionRef = collection(db, 'alliances');
         const usersCollectionRef = collection(db, 'users');
@@ -131,13 +119,13 @@ export default function RegisterPage() {
         prideName: prideName,
         role: role,
         status: 'active',
-        money: initialMoney,
-        food: initialFood,
-        land: initialLand,
+        money: role === 'user' ? initialResources.money : 0,
+        food: role === 'user' ? initialResources.food : 0,
+        land: role === 'user' ? initialResources.land : 0,
         zodiac: zodiac,
         province: province,
-        pride: initialPride,
-        unemployed: initialUnemployed,
+        pride: role === 'user' ? 500 : 0,
+        unemployed: role === 'user' ? initialResources.unemployed : 0,
         buildings: { residence: 0, farm: 0, fort: 0, university: 0, barracks: 0, mobility: 0, tambang: 0 },
         units: { attack: 0, defense: 0, elite: 0, raider: 0, spy: 0 },
         lastResourceUpdate: Timestamp.now(),
@@ -248,8 +236,8 @@ export default function RegisterPage() {
                             <Label htmlFor="password">Kata Sandi</Label>
                             <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)}/>
                         </div>
-                        <Button type="submit" className="w-full">
-                            Buat akun
+                        <Button type="submit" className="w-full" disabled={isLoadingSettings}>
+                            {isLoadingSettings ? 'Memuat...' : 'Buat Akun'}
                         </Button>
                     </div>
                   </form>
@@ -269,5 +257,3 @@ export default function RegisterPage() {
     </div>
   );
 }
-
-    

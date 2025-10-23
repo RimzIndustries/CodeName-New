@@ -6,32 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Crown, Coins, Heart } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { doc, getDoc, collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
+import { doc, collection, onSnapshot, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Progress } from '@/components/ui/progress';
-
-// Interface untuk gelar, dicocokkan dengan data di Firestore
-interface GameTitle {
-  id: string;
-  name: string;
-  prideRequired: number;
-  attackBonus: number;
-  defenseBonus: number;
-  resourceBonus: number;
-}
-
-interface BuildingEffects {
-  residence: { unemployed: number; capacity: number };
-  farm: { unemployed: number; food: number };
-  fort: { unemployed: number; defenseBonus: number };
-  university: { unemployed: number; eliteBonus: number; constructionBonus: number };
-  barracks: { unemployed: number; trainingBonus: number };
-  mobility: { unemployed: number; attackBonus: number };
-  tambang: { unemployed: number; money: number };
-}
+import { useGameSettings, type GameTitle } from '@/context/GameSettingsContext';
 
 export default function UserDashboardPage() {
   const { userProfile, loading } = useAuth();
+  const { settings, isLoading: isLoadingSettings } = useGameSettings();
   const [countdown, setCountdown] = useState('');
   const [allianceName, setAllianceName] = useState<string | null>(null);
 
@@ -41,17 +23,6 @@ export default function UserDashboardPage() {
   const [nextTitle, setNextTitle] = useState<GameTitle | null>(null);
   const [titleProgress, setTitleProgress] = useState(0);
   const [isLoadingTitles, setIsLoadingTitles] = useState(true);
-  
-  // State for admin message
-  const [adminMessage, setAdminMessage] = useState<string>('');
-  const [isLoadingMessage, setIsLoadingMessage] = useState(true);
-  
-  // State for game settings for display
-  const [hourlyMoneyBonus, setHourlyMoneyBonus] = useState(0);
-  const [hourlyFoodBonus, setHourlyFoodBonus] = useState(0);
-  const [buildingEffects, setBuildingEffects] = useState<Partial<BuildingEffects>>({});
-  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
-
 
   useEffect(() => {
     const calculateCountdown = () => {
@@ -126,46 +97,6 @@ export default function UserDashboardPage() {
     return () => unsubscribe();
   }, []);
 
-  // Fetch admin message and game settings
-  useEffect(() => {
-    setIsLoadingMessage(true);
-    setIsLoadingSettings(true);
-    
-    const unsubFns: (()=>void)[] = [];
-
-    const infoDocRef = doc(db, 'game-settings', 'admin-info');
-    unsubFns.push(onSnapshot(infoDocRef, (docSnap) => {
-        if (docSnap.exists() && docSnap.data().message) {
-            setAdminMessage(docSnap.data().message);
-        } else {
-            setAdminMessage(''); 
-        }
-        setIsLoadingMessage(false);
-    }, (error) => {
-        console.error("Error fetching admin message:", error);
-        setAdminMessage('');
-        setIsLoadingMessage(false);
-    }));
-
-    const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
-    unsubFns.push(onSnapshot(bonusesDocRef, (docSnap) => {
-        if(docSnap.exists()){
-            setHourlyMoneyBonus(docSnap.data().money ?? 0);
-            setHourlyFoodBonus(docSnap.data().food ?? 0);
-        }
-        setIsLoadingSettings(false);
-    }));
-
-    const effectsDocRef = doc(db, 'game-settings', 'building-effects');
-    unsubFns.push(onSnapshot(effectsDocRef, (docSnap) => {
-        if(docSnap.exists()){
-            setBuildingEffects(docSnap.data());
-        }
-        setIsLoadingSettings(false);
-    }));
-
-    return () => unsubFns.forEach(fn => fn());
-  }, []);
 
   // Menentukan gelar saat ini, berikutnya, dan progress
   useEffect(() => {
@@ -221,14 +152,14 @@ export default function UserDashboardPage() {
   }, [userProfile, userProfile?.pride, titles, isLoadingTitles]);
 
 
-  if (loading || !userProfile) {
+  if (loading || isLoadingSettings || !userProfile) {
     return null; // Layout akan menampilkan status loading
   }
 
-  const moneyFromTambang = (userProfile.buildings?.tambang ?? 0) * (buildingEffects.tambang?.money ?? 0);
-  const foodFromFarm = (userProfile.buildings?.farm ?? 0) * (buildingEffects.farm?.food ?? 0);
-  const totalMoneyBonus = hourlyMoneyBonus + moneyFromTambang;
-  const totalFoodBonus = hourlyFoodBonus + foodFromFarm;
+  const moneyFromTambang = (userProfile.buildings?.tambang ?? 0) * (settings.effects.tambang?.money ?? 0);
+  const foodFromFarm = (userProfile.buildings?.farm ?? 0) * (settings.effects.farm?.food ?? 0);
+  const totalMoneyBonus = settings.globalBonuses.money + moneyFromTambang;
+  const totalFoodBonus = settings.globalBonuses.food + foodFromFarm;
 
   return (
     <div className="space-y-4">
@@ -308,13 +239,13 @@ export default function UserDashboardPage() {
                             <span className="text-muted-foreground flex items-center gap-2"><Coins className="h-4 w-4" /> Bonus Uang</span>
                             <span>{totalMoneyBonus.toLocaleString()} uFtB</span>
                         </div>
-                        <p className="text-xs text-muted-foreground pl-6">Global: {hourlyMoneyBonus.toLocaleString()} + Bangunan: {moneyFromTambang.toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground pl-6">Global: {settings.globalBonuses.money.toLocaleString()} + Bangunan: {moneyFromTambang.toLocaleString()}</p>
                         <Separator className="my-2"/>
                         <div className="flex items-center justify-between">
                             <span className="text-muted-foreground flex items-center gap-2"><Heart className="h-4 w-4" /> Bonus Makanan</span>
                             <span>{totalFoodBonus.toLocaleString()} mFtB</span>
                         </div>
-                        <p className="text-xs text-muted-foreground pl-6">Global: {hourlyFoodBonus.toLocaleString()} + Bangunan: {foodFromFarm.toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground pl-6">Global: {settings.globalBonuses.food.toLocaleString()} + Bangunan: {foodFromFarm.toLocaleString()}</p>
                     </>
                 )}
             </CardContent>
@@ -365,10 +296,10 @@ export default function UserDashboardPage() {
         {/* Ritual Info */}
         <Card>
           <CardContent className="p-4 text-center text-sm">
-            {isLoadingMessage ? (
+            {isLoadingSettings ? (
               <p>Memuat informasi...</p>
             ) : (
-              <p className="whitespace-pre-wrap">{adminMessage || 'Tidak ada informasi dari admin saat ini.'}</p>
+              <p className="whitespace-pre-wrap">{settings.adminMessage || 'Tidak ada informasi dari admin saat ini.'}</p>
             )}
           </CardContent>
         </Card>

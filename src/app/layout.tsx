@@ -4,6 +4,7 @@ import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import { ThemeProvider } from '@/components/theme-provider';
 import { AuthProvider } from '@/context/AuthContext';
+import { GameSettingsProvider } from '@/context/GameSettingsContext';
 
 export const metadata: Metadata = {
   title: 'Code Name',
@@ -30,8 +31,10 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
-            {children}
-            <Toaster />
+            <GameSettingsProvider>
+              {children}
+              <Toaster />
+            </GameSettingsProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

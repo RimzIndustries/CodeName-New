@@ -9,27 +9,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { useEffect, useState, useMemo } from 'react';
-import { doc, getDoc, updateDoc, increment, collection, writeBatch, Timestamp, addDoc, query, where, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, increment, collection, writeBatch, Timestamp, addDoc, query, where, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
 import { differenceInSeconds } from 'date-fns';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useGameSettings, type BuildingCounts, type UnitCounts, type BuildingCosts, type UnitCosts } from '@/context/GameSettingsContext';
 
 
-// --- Building-related Interfaces and Constants ---
-interface BuildingCosts {
-    residence: number; farm: number; fort: number; university: number;
-    barracks: number; mobility: number; tambang: number;
-}
-interface BuildingCounts {
-    residence: number; farm: number; fort: number; university: number;
-    barracks: number; mobility: number; tambang: number;
-}
 interface ConstructionJob {
     id: string; buildingId: keyof BuildingCounts; amount: number; completionTime: Timestamp;
 }
-const defaultBuildingCosts: BuildingCosts = { residence: 1000, farm: 1200, fort: 2500, university: 5000, barracks: 1500, mobility: 1000, tambang: 2000 };
 const buildingDefinitions = [
   { id: 'residence', name: 'Rumah', description: 'Menambah kapasitas dan menghasilkan pengangguran.' },
   { id: 'farm', name: 'Sawah', description: 'Menghasilkan makanan dan pengangguran.' },
@@ -44,17 +35,9 @@ const buildingNameMap: { [key: string]: string } = {
   barracks: 'Barak Pasukan', mobility: 'Mobilitas Pasukan', tambang: 'Tambang'
 };
 
-// --- Barracks-related Interfaces and Constants ---
-interface UnitCosts {
-    attack: number; defense: number; elite: number; raider: number; spy: number;
-}
-interface UnitCounts {
-    attack: number; defense: number; elite: number; raider: number; spy: number;
-}
 interface TrainingJob {
     id: string; userId: string; unitId: keyof UnitCounts; amount: number; completionTime: Timestamp;
 }
-const defaultUnitCosts: UnitCosts = { attack: 350, defense: 350, elite: 950, raider: 500, spy: 700 };
 const unitDefinitions = [
   { id: 'attack', name: 'Pasukan Serang', stats: '(10/0)' },
   { id: 'defense', name: 'Pasukan Bertahan', stats: '(0/10)' },
@@ -96,15 +79,8 @@ function Countdown({ completionTime }: { completionTime: Timestamp }) {
 
 export default function ConstructionAndTrainingPage() {
   const { user, userProfile } = useAuth();
+  const { settings, isLoading: isLoadingSettings } = useGameSettings();
   const { toast } = useToast();
-  
-  // Settings state
-  const [buildingCosts, setBuildingCosts] = useState<BuildingCosts>(defaultBuildingCosts);
-  const [unitCosts, setUnitCosts] = useState<UnitCosts>(defaultUnitCosts);
-  const [constructionTime, setConstructionTime] = useState(5);
-  const [trainingTime, setTrainingTime] = useState(2);
-  const [constructionBonus, setConstructionBonus] = useState(5);
-  const [barracksBonus, setBarracksBonus] = useState(50);
   
   // Building state
   const [buildOrder, setBuildOrder] = useState<{ [key: string]: number }>({});
@@ -124,34 +100,6 @@ export default function ConstructionAndTrainingPage() {
   const [trainingQueue, setTrainingQueue] = useState<TrainingJob[]>([]);
   const [isLoadingTrainingQueue, setIsLoadingTrainingQueue] = useState(true);
   
-  useEffect(() => {
-    const fetchGameSettings = async () => {
-        const costsDocRef = doc(db, 'game-settings', 'game-costs');
-        const timingDocRef = doc(db, 'game-settings', 'timing-rules');
-        const effectsDocRef = doc(db, 'game-settings', 'building-effects');
-
-        const [costsSnap, timingSnap, effectsSnap] = await Promise.all([
-          getDoc(costsDocRef), getDoc(timingDocRef), getDoc(effectsDocRef)
-        ]);
-
-        if (costsSnap.exists()) {
-            if (costsSnap.data().buildings) setBuildingCosts(costsSnap.data().buildings);
-            if (costsSnap.data().units) setUnitCosts(costsSnap.data().units);
-        }
-        if (timingSnap.exists()) {
-            const data = timingSnap.data();
-            if (data.constructionTimeInHours !== undefined) setConstructionTime(data.constructionTimeInHours);
-            if (data.trainingTimeInHours !== undefined) setTrainingTime(data.trainingTimeInHours);
-        }
-        if (effectsSnap.exists()) {
-            const data = effectsSnap.data();
-            if (data.university) setConstructionBonus(data.university.constructionBonus ?? 5);
-            if (data.barracks) setBarracksBonus(data.barracks.trainingBonus ?? 50);
-        }
-    };
-    fetchGameSettings();
-  }, []);
-
   useEffect(() => {
     if (!user) return;
     setIsLoadingConstructionQueue(true);
@@ -209,22 +157,22 @@ export default function ConstructionAndTrainingPage() {
   };
 
   const handleSetMaxTrain = (unitId: string) => {
-    if (!userProfile) return;
-    const costPerUnit = unitCosts[unitId as keyof UnitCosts];
+    if (!userProfile || isLoadingSettings) return;
+    const costPerUnit = settings.costs.units[unitId as keyof UnitCosts];
     const maxFromMoney = costPerUnit > 0 ? Math.floor((userProfile.money ?? 0) / costPerUnit) : Infinity;
     const maxFromPopulation = userProfile.unemployed ?? 0;
     setTrainOrder(prev => ({ ...prev, [unitId]: Math.min(maxFromMoney, maxFromPopulation) }));
   };
 
   const handleOrderConstruction = async () => {
-    if (!user || !userProfile) return;
+    if (!user || !userProfile || isLoadingSettings) return;
     setIsBuilding(true);
 
     let totalCost = 0, totalBuildingsOrdered = 0, orderSummary = '';
     for (const buildingId in buildOrder) {
         const amount = buildOrder[buildingId];
         if (amount > 0) {
-            totalCost += amount * (buildingCosts[buildingId as keyof BuildingCosts] ?? 0);
+            totalCost += amount * (settings.costs.buildings[buildingId as keyof BuildingCosts] ?? 0);
             totalBuildingsOrdered += amount;
             orderSummary += `${amount.toLocaleString()} ${buildingNameMap[buildingId] || buildingId}, `;
         }
@@ -248,9 +196,9 @@ export default function ConstructionAndTrainingPage() {
         const userDocRef = doc(db, 'users', user.uid);
         batch.update(userDocRef, { money: increment(-totalCost) });
         
-        const totalBonusPercent = (ownedBuildings?.university ?? 0) * constructionBonus;
+        const totalBonusPercent = (ownedBuildings?.university ?? 0) * (settings.effects.university.constructionBonus ?? 0);
         const timeMultiplier = Math.max(0.1, 1 - (totalBonusPercent / 100));
-        const durationPerJobInMs = constructionTime * timeMultiplier * 60 * 60 * 1000;
+        const durationPerJobInMs = settings.timing.constructionTime * timeMultiplier * 60 * 60 * 1000;
 
         for (const buildingId in buildOrder) {
             if (buildOrder[buildingId] > 0) {
@@ -311,14 +259,14 @@ export default function ConstructionAndTrainingPage() {
   };
   
   const handleTrainTroops = async () => {
-    if (!user || !userProfile) return;
+    if (!user || !userProfile || isLoadingSettings) return;
     setIsTraining(true);
 
     let totalCost = 0, totalUnemployedNeeded = 0, orderCount = 0, orderSummary = '';
     for (const unitId in trainOrder) {
         const amount = trainOrder[unitId];
         if (amount > 0) {
-            totalCost += amount * (unitCosts[unitId as keyof UnitCosts] ?? 0);
+            totalCost += amount * (settings.costs.units[unitId as keyof UnitCosts] ?? 0);
             totalUnemployedNeeded += amount;
             orderCount++;
             orderSummary += `${amount.toLocaleString()} ${unitNameMap[unitId] || unitId}, `;
@@ -343,9 +291,9 @@ export default function ConstructionAndTrainingPage() {
         const userDocRef = doc(db, 'users', user.uid);
         batch.update(userDocRef, { money: increment(-totalCost), unemployed: increment(-totalUnemployedNeeded) });
         
-        const totalBonusPercent = (userProfile.buildings?.barracks ?? 0) * barracksBonus;
+        const totalBonusPercent = (userProfile.buildings?.barracks ?? 0) * (settings.effects.barracks.trainingBonus ?? 0);
         const timeMultiplier = Math.max(0.1, 1 - (totalBonusPercent / 100));
-        const durationPerJobInMs = trainingTime * timeMultiplier * 60 * 60 * 1000;
+        const durationPerJobInMs = settings.timing.trainingTime * timeMultiplier * 60 * 60 * 1000;
 
         let lastCompletionTime = new Date();
         if (trainingQueue.length > 0) lastCompletionTime = trainingQueue[trainingQueue.length - 1].completionTime.toDate();
@@ -409,6 +357,10 @@ export default function ConstructionAndTrainingPage() {
         setIsDismissing(false);
     }
   };
+  
+  if (isLoadingSettings) {
+      return <Card><CardContent className="p-6 text-center">Memuat pengaturan permainan...</CardContent></Card>
+  }
 
   return (
     <Card>
@@ -440,7 +392,7 @@ export default function ConstructionAndTrainingPage() {
                     <TableRow key={b.id}>
                       <TableCell>{b.name}</TableCell>
                       <TableCell className="text-right">{(ownedBuildings[b.id as keyof BuildingCounts] ?? 0).toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{(buildingCosts[b.id as keyof BuildingCosts] ?? 0).toLocaleString()} uFtB</TableCell>
+                      <TableCell className="text-right">{(settings.costs.buildings[b.id as keyof BuildingCosts] ?? 0).toLocaleString()} uFtB</TableCell>
                       <TableCell><Input type="number" placeholder="0" value={buildOrder[b.id] || ''} onChange={(e) => handleBuildOrderChange(b.id, e.target.value)} className="h-8 w-20 text-center bg-input/50 mx-auto" min="0" /></TableCell>
                     </TableRow>
                   ))}
@@ -487,7 +439,7 @@ export default function ConstructionAndTrainingPage() {
                     <TableRow key={unit.id}>
                       <TableCell>{unit.name} <span className="text-muted-foreground">{unit.stats}</span></TableCell>
                       <TableCell className="text-right">{(ownedUnits[unit.id as keyof UnitCounts] ?? 0).toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{unitCosts[unit.id as keyof UnitCosts]} uFtB</TableCell>
+                      <TableCell className="text-right">{settings.costs.units[unit.id as keyof UnitCosts]} uFtB</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2 justify-center">
                             <Input type="number" value={trainOrder[unit.id] || ''} onChange={(e) => handleTrainOrderChange(unit.id, e.target.value)} placeholder="0" className="h-8 w-16 text-center bg-input/50" min="0"/>

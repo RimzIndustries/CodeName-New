@@ -9,6 +9,7 @@ import type { ReactNode } from 'react';
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { Crown } from 'lucide-react';
+import { type GameSettings, useGameSettings } from './GameSettingsContext';
 
 interface BuildingCounts {
   residence: number;
@@ -61,7 +62,7 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
 });
 
-async function processBackgroundTasksForUser(uid: string, profile: UserProfile) {
+async function processBackgroundTasksForUser(uid: string, profile: UserProfile, gameSettings: GameSettings) {
     if (!profile || profile.role !== 'user') return;
 
     const userDocRef = doc(db, 'users', uid);
@@ -69,23 +70,9 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
     const batch = writeBatch(db);
     let hasUpdate = false;
 
-    // --- Batch Fetch Game Settings ---
-    const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
-    const buildingEffectsRef = doc(db, 'game-settings', 'building-effects');
+    // --- Fetch Game Titles ---
     const titlesRef = collection(db, 'titles');
-    
-    const [
-        bonusesDocSnap,
-        buildingEffectsSnap,
-        titlesSnapshot
-    ] = await Promise.all([
-        getDoc(bonusesDocRef),
-        getDoc(buildingEffectsRef),
-        getDocs(titlesRef)
-    ]);
-
-    const bonusData = bonusesDocSnap.exists() ? bonusesDocSnap.data() : { money: 0, food: 0 };
-    const effectsData = buildingEffectsSnap.exists() ? buildingEffectsSnap.data() : {};
+    const titlesSnapshot = await getDocs(titlesRef);
     const titles = titlesSnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
 
 
@@ -96,19 +83,19 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
         const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
 
         if (diffInHours > 0) {
-            const hourlyMoneyBonus = bonusData.money ?? 0;
-            const hourlyFoodBonus = bonusData.food ?? 0;
+            const hourlyMoneyBonus = gameSettings.globalBonuses.money ?? 0;
+            const hourlyFoodBonus = gameSettings.globalBonuses.food ?? 0;
             
-            const moneyFromTambang = (profile.buildings?.tambang ?? 0) * (effectsData.tambang?.money ?? 0);
-            const foodFromFarm = (profile.buildings?.farm ?? 0) * (effectsData.farm?.food ?? 0);
+            const moneyFromTambang = (profile.buildings?.tambang ?? 0) * (gameSettings.effects.tambang?.money ?? 0);
+            const foodFromFarm = (profile.buildings?.farm ?? 0) * (gameSettings.effects.farm?.food ?? 0);
             
             let unemployedFromBuildings = 0;
-            if (profile.buildings && effectsData) {
+            if (profile.buildings && gameSettings.effects) {
                 for (const buildingKey in profile.buildings) {
                     const buildingCount = profile.buildings[buildingKey as keyof BuildingCounts] || 0;
-                    const buildingEffect = effectsData[buildingKey as keyof BuildingCounts];
-                    if (buildingEffect && buildingEffect.unemployed) {
-                        unemployedFromBuildings += buildingCount * buildingEffect.unemployed;
+                    const buildingEffect = gameSettings.effects[buildingKey as keyof BuildingCounts];
+                    if (buildingEffect && (buildingEffect as any).unemployed) {
+                        unemployedFromBuildings += buildingCount * (buildingEffect as any).unemployed;
                     }
                 }
             }
@@ -205,9 +192,9 @@ async function processBackgroundTasksForUser(uid: string, profile: UserProfile) 
             const attackerTitleBonus = getBonus(attackerProfile, 'attack');
             const defenderTitleBonus = getBonus(defenderProfile, 'defense');
 
-            const mobilityAttackBonusPerBuilding = effectsData.mobility?.attackBonus ?? 0;
-            const fortDefenseBonusPerBuilding = effectsData.fort?.defenseBonus ?? 0;
-            const universityEliteBonusPerBuilding = effectsData.university?.eliteBonus ?? 0;
+            const mobilityAttackBonusPerBuilding = gameSettings.effects.mobility?.attackBonus ?? 0;
+            const fortDefenseBonusPerBuilding = gameSettings.effects.fort?.defenseBonus ?? 0;
+            const universityEliteBonusPerBuilding = gameSettings.effects.university?.eliteBonus ?? 0;
             
             const attackerMobilityBonus = (attackerProfile.buildings?.mobility ?? 0) * mobilityAttackBonusPerBuilding;
             const defenderFortBonus = (defenderProfile.buildings?.fort ?? 0) * fortDefenseBonusPerBuilding;
@@ -440,6 +427,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const { settings: gameSettings, isLoading: isLoadingSettings } = useGameSettings();
   const router = useRouter();
   const pathname = usePathname();
   const backgroundTasksProcessed = useRef(false);
@@ -464,8 +452,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router, pathname]);
 
   useEffect(() => {
-    if (!user) {
-      setLoading(false);
+    if (!user || isLoadingSettings) {
+      if (!user) setLoading(false);
       return;
     }
 
@@ -481,7 +469,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (initialDocSnap.exists()) {
             const initialProfile = { uid: initialDocSnap.id, ...initialDocSnap.data() } as UserProfile;
             if (initialProfile.role === 'user') {
-              await processBackgroundTasksForUser(user.uid, initialProfile);
+              await processBackgroundTasksForUser(user.uid, initialProfile, gameSettings);
             }
           }
           backgroundTasksProcessed.current = true;
@@ -530,11 +518,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         unsubscribeFromSnapshot();
       }
     };
-  }, [user, router, pathname]);
+  }, [user, router, pathname, gameSettings, isLoadingSettings]);
 
   const value = { user, userProfile, loading };
 
-  if (loading && (pathname.startsWith('/userdashboard') || pathname.startsWith('/admindashboard'))) {
+  if ((loading || isLoadingSettings) && (pathname.startsWith('/userdashboard') || pathname.startsWith('/admindashboard'))) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">

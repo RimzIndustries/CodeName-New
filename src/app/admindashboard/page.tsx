@@ -24,6 +24,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { getGameAdvice, type GameAdviceInput, type GameAdviceOutput } from '@/ai/flows/game-advice-flow';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useGameSettings, type GameTitle, type UnitCosts, type BuildingCosts, type BuildingEffects } from '@/context/GameSettingsContext';
 
 // Interface untuk data pengguna untuk meningkatkan keamanan tipe
 interface DisplayUser {
@@ -41,34 +42,6 @@ interface DisplayUser {
   [key: string]: any; 
 }
 
-// Interfaces for game costs
-interface UnitCosts {
-    attack: number;
-    defense: number;
-    elite: number;
-    raider: number;
-    spy: number;
-}
-
-interface BuildingCosts {
-    residence: number;
-    farm: number;
-    fort: number;
-    university: number;
-    barracks: number;
-    mobility: number;
-    tambang: number;
-}
-
-// Interface for game titles
-interface GameTitle {
-  id: string;
-  name: string;
-  prideRequired: number;
-  attackBonus: number;
-  defenseBonus: number;
-  resourceBonus: number;
-}
 
 // Interface untuk aliansi
 interface Alliance {
@@ -80,17 +53,6 @@ interface Alliance {
     y: number;
   };
   logoUrl?: string;
-}
-
-// Interface for building effects
-interface BuildingEffects {
-  residence: { unemployed: number; capacity: number };
-  farm: { unemployed: number; food: number };
-  fort: { unemployed: number; defenseBonus: number };
-  university: { unemployed: number; eliteBonus: number; constructionBonus: number };
-  barracks: { unemployed: number; trainingBonus: number };
-  mobility: { unemployed: number; attackBonus: number };
-  tambang: { unemployed: number; money: number };
 }
 
 interface War {
@@ -128,43 +90,24 @@ const effectNameMap: { [key: string]: string } = {
 
 export default function AdminDashboardPage() {
   const { user, userProfile, loading } = useAuth();
+  const { settings, isLoading: isLoadingSettings, setSettings } = useGameSettings();
   const router = useRouter();
   const { toast } = useToast();
   const [users, setUsers] = useState<DisplayUser[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
 
-  // State for game settings
-  const [initialMoney, setInitialMoney] = useState(1000);
-  const [initialFood, setInitialFood] = useState(500);
-  const [initialLand, setInitialLand] = useState(100);
-  const [initialUnemployed, setInitialUnemployed] = useState(10);
-  const [unitCosts, setUnitCosts] = useState<UnitCosts>({ attack: 350, defense: 350, elite: 950, raider: 500, spy: 700 });
-  const [buildingCosts, setBuildingCosts] = useState<BuildingCosts>({ residence: 1000, farm: 1200, fort: 2500, university: 5000, barracks: 1500, mobility: 1000, tambang: 2000 });
-  const [constructionTime, setConstructionTime] = useState(5); // in hours
-  const [trainingTime, setTrainingTime] = useState(2); // in hours
-  const [buildingEffects, setBuildingEffects] = useState<BuildingEffects>({
-    residence: { unemployed: 20, capacity: 500 },
-    farm: { unemployed: 1, food: 100 },
-    fort: { unemployed: 2, defenseBonus: 10 },
-    university: { unemployed: 2, eliteBonus: 20, constructionBonus: 5 },
-    barracks: { unemployed: 5, trainingBonus: 50 },
-    mobility: { unemployed: 2, attackBonus: 50 },
-    tambang: { unemployed: 2, money: 100 },
-  });
-  const [votingPowerDivisor, setVotingPowerDivisor] = useState(100);
-  const [hourlyMoneyBonus, setHourlyMoneyBonus] = useState(100);
-  const [hourlyFoodBonus, setHourlyFoodBonus] = useState(10);
-  const [isSavingBonuses, setIsSavingBonuses] = useState(false);
+  // Local state for form inputs, initialized from context
+  const [localSettings, setLocalSettings] = useState(settings);
 
+  useEffect(() => {
+    setLocalSettings(settings);
+  }, [settings]);
+  
+  const [isSaving, setIsSaving] = useState<Record<string, boolean>>({});
 
-  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
-  const [isSavingCosts, setIsSavingCosts] = useState(false);
-  const [isSavingTime, setIsSavingTime] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isResettingAlliances, setIsResettingAlliances] = useState(false);
   const [isDeletingPlayers, setIsDeletingPlayers] = useState(false);
-  const [isSavingEffects, setIsSavingEffects] = useState(false);
-  const [isSavingMechanics, setIsSavingMechanics] = useState(false);
 
   // State for title settings
   const [titles, setTitles] = useState<GameTitle[]>([]);
@@ -220,6 +163,30 @@ export default function AdminDashboardPage() {
   const [wars, setWars] = useState<War[]>([]);
   const [isLoadingWars, setIsLoadingWars] = useState(true);
 
+  const handleSettingChange = (category: string, key: string, value: any, subkey?: string) => {
+    setLocalSettings(prev => {
+      const newSettings = { ...prev };
+      if (subkey) {
+        (newSettings as any)[category][key][subkey] = value;
+      } else {
+        (newSettings as any)[category][key] = value;
+      }
+      return newSettings;
+    });
+  };
+
+  const handleEffectChange = (buildingKey: keyof BuildingEffects, effectKey: keyof BuildingEffects[keyof BuildingEffects], value: number) => {
+      setLocalSettings(prev => ({
+        ...prev,
+        effects: {
+            ...prev.effects,
+            [buildingKey]: {
+                ...prev.effects[buildingKey],
+                [effectKey]: value
+            }
+        }
+    }));
+  };
 
   useEffect(() => {
     if (!loading && (!user || userProfile?.role !== 'admin')) {
@@ -229,11 +196,8 @@ export default function AdminDashboardPage() {
   
   // Fetch all data on mount if user is admin
   useEffect(() => {
-    // Only fetch data if the user is a verified admin.
     if (userProfile?.role !== 'admin') {
-      // Set loading states to false to prevent infinite loaders on non-admin access.
       setIsLoadingUsers(false);
-      setIsLoadingSettings(false);
       setIsLoadingTitles(false);
       setIsLoadingAlliances(false);
       setIsLoadingWars(false);
@@ -253,80 +217,13 @@ export default function AdminDashboardPage() {
         } finally {
             setIsLoadingUsers(false);
         }
-
-        // Game Settings
-        setIsLoadingSettings(true);
-        try {
-            const settingsDocRef = doc(db, 'game-settings', 'initial-resources');
-            const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
-            const costsDocRef = doc(db, 'game-settings', 'game-costs');
-            const timingDocRef = doc(db, 'game-settings', 'timing-rules');
-            const effectsDocRef = doc(db, 'game-settings', 'building-effects');
-            const mechanicsDocRef = doc(db, 'game-settings', 'game-mechanics');
-            const infoDocRef = doc(db, 'game-settings', 'admin-info');
-
-            const [
-              settingsDocSnap,
-              bonusesDocSnap,
-              costsDocSnap,
-              timingDocSnap,
-              effectsDocSnap,
-              mechanicsDocSnap,
-              infoDocSnap,
-            ] = await Promise.all([
-              getDoc(settingsDocRef),
-              getDoc(bonusesDocRef),
-              getDoc(costsDocRef),
-              getDoc(timingDocRef),
-              getDoc(effectsDocRef),
-              getDoc(mechanicsDocRef),
-              getDoc(infoDocRef),
-            ]);
-
-            if (settingsDocSnap.exists()) {
-              const data = settingsDocSnap.data();
-              setInitialMoney(data.money ?? 1000);
-              setInitialFood(data.food ?? 500);
-              setInitialLand(data.land ?? 100);
-              setInitialUnemployed(data.unemployed ?? 10);
+        
+        // Admin Message
+        getDoc(doc(db, 'game-settings', 'admin-info')).then(docSnap => {
+            if (docSnap.exists()) {
+                setAdminMessage(docSnap.data().message ?? '');
             }
-
-            if (bonusesDocSnap.exists()) {
-              const data = bonusesDocSnap.data();
-              setHourlyMoneyBonus(data.money ?? 100);
-              setHourlyFoodBonus(data.food ?? 10);
-            }
-
-            if (costsDocSnap.exists()) {
-                const data = costsDocSnap.data();
-                if (data.units) setUnitCosts(data.units);
-                if (data.buildings) setBuildingCosts(data.buildings);
-            }
-
-            if (timingDocSnap.exists()) {
-                const data = timingDocSnap.data();
-                if (data.constructionTimeInHours !== undefined) setConstructionTime(data.constructionTimeInHours);
-                if (data.trainingTimeInHours !== undefined) setTrainingTime(data.trainingTimeInHours);
-            }
-            
-            if (effectsDocSnap.exists()) {
-                setBuildingEffects(effectsDocSnap.data() as BuildingEffects);
-            }
-
-            if (mechanicsDocSnap.exists()) {
-                const data = mechanicsDocSnap.data();
-                if (data.votingPowerDivisor !== undefined) setVotingPowerDivisor(data.votingPowerDivisor);
-            }
-            
-            if (infoDocSnap.exists()) {
-              setAdminMessage(infoDocSnap.data().message ?? '');
-            }
-        } catch (error) {
-            console.error("Error fetching settings:", error);
-            toast({ title: "Gagal memuat pengaturan", variant: "destructive" });
-        } finally {
-            setIsLoadingSettings(false);
-        }
+        });
         
         // Titles
         setIsLoadingTitles(true);
@@ -462,71 +359,52 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const handleUpdateSettings = async (e: React.FormEvent) => {
+  const handleUpdateSettings = async (e: React.FormEvent, docName: string, data: object, toastTitle: string) => {
     e.preventDefault();
-    const settingsDocRef = doc(db, 'game-settings', 'initial-resources');
+    setIsSaving(prev => ({...prev, [docName]: true}));
+    const docRef = doc(db, 'game-settings', docName);
     try {
-        await setDoc(settingsDocRef, {
-            money: Number(initialMoney),
-            food: Number(initialFood),
-            land: Number(initialLand),
-            unemployed: Number(initialUnemployed),
-        }, { merge: true });
-        toast({
-            title: "Pengaturan Diperbarui",
-            description: "Sumber daya awal untuk pengguna baru telah disimpan.",
-        });
-    } catch (error) {
-        console.error("Error updating settings:", error);
-        toast({
-            title: "Gagal Memperbarui Pengaturan",
-            description: "Terjadi kesalahan saat mencoba menyimpan pengaturan.",
-            variant: "destructive",
-        });
-    }
-  };
+        await setDoc(docRef, data, { merge: true });
+        // After successful save, update the main context state
+        if (docName === 'initial-resources') setSettings(prev => ({ ...prev, initialResources: { ...prev.initialResources, ...data } }));
+        if (docName === 'global-bonuses') setSettings(prev => ({ ...prev, globalBonuses: { ...prev.globalBonuses, ...data } }));
+        if (docName === 'game-costs') setSettings(prev => ({ ...prev, costs: { ...prev.costs, ...data } }));
+        if (docName === 'timing-rules') setSettings(prev => ({ ...prev, timing: { ...prev.timing, ...data } }));
+        if (docName === 'building-effects') setSettings(prev => ({ ...prev, effects: { ...prev.effects, ...data } }));
+        if (docName === 'game-mechanics') setSettings(prev => ({ ...prev, mechanics: { ...prev.mechanics, ...data } }));
 
-  const handleUpdateBonuses = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingBonuses(true);
-    const bonusesDocRef = doc(db, 'game-settings', 'global-bonuses');
-    try {
-        await setDoc(bonusesDocRef, {
-            money: Number(hourlyMoneyBonus),
-            food: Number(hourlyFoodBonus),
-        }, { merge: true });
         toast({
-            title: "Bonus Global Diperbarui",
-            description: "Pengaturan bonus per jam telah disimpan.",
+            title: toastTitle,
+            description: "Pengaturan permainan telah berhasil disimpan.",
         });
     } catch (error) {
-        console.error("Error updating bonuses:", error);
+        console.error(`Error updating ${docName}:`, error);
         toast({
-            title: "Gagal Memperbarui Bonus",
+            title: `Gagal Memperbarui ${toastTitle}`,
             variant: "destructive",
         });
     } finally {
-        setIsSavingBonuses(false);
+        setIsSaving(prev => ({...prev, [docName]: false}));
     }
   };
 
   const handleUpdateCosts = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSavingCosts(true);
+    setIsSaving(prev => ({...prev, costs: true}));
     const costsDocRef = doc(db, 'game-settings', 'game-costs');
     
     const sanitizedUnitCosts = Object.fromEntries(
-        Object.entries(unitCosts).map(([key, value]) => [key, isNaN(Number(value)) ? 0 : Number(value)])
+        Object.entries(localSettings.costs.units).map(([key, value]) => [key, isNaN(Number(value)) ? 0 : Number(value)])
     ) as UnitCosts;
     const sanitizedBuildingCosts = Object.fromEntries(
-        Object.entries(buildingCosts).map(([key, value]) => [key, isNaN(Number(value)) ? 0 : Number(value)])
+        Object.entries(localSettings.costs.buildings).map(([key, value]) => [key, isNaN(Number(value)) ? 0 : Number(value)])
     ) as BuildingCosts;
 
+    const data = { units: sanitizedUnitCosts, buildings: sanitizedBuildingCosts };
+
     try {
-        await setDoc(costsDocRef, {
-            units: sanitizedUnitCosts,
-            buildings: sanitizedBuildingCosts,
-        }, { merge: true });
+        await setDoc(costsDocRef, data, { merge: true });
+        setSettings(prev => ({...prev, costs: data }));
         toast({
             title: "Biaya Diperbarui",
             description: "Biaya dasar untuk unit dan bangunan telah disimpan.",
@@ -539,88 +417,15 @@ export default function AdminDashboardPage() {
             variant: "destructive",
         });
     } finally {
-        setIsSavingCosts(false);
+        setIsSaving(prev => ({...prev, costs: false}));
     }
   };
 
-  const handleUpdateTimeSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingTime(true);
-    const timingDocRef = doc(db, 'game-settings', 'timing-rules');
-    try {
-        await setDoc(timingDocRef, {
-            constructionTimeInHours: Number(constructionTime),
-            trainingTimeInHours: Number(trainingTime),
-        }, { merge: true });
-        toast({
-            title: "Pengaturan Waktu Diperbarui",
-            description: "Waktu konstruksi dan pelatihan telah disimpan.",
-        });
-    } catch (error) {
-        console.error("Error updating time settings:", error);
-        toast({
-            title: "Gagal Memperbarui Waktu",
-            description: "Terjadi kesalahan saat mencoba menyimpan pengaturan waktu.",
-            variant: "destructive",
-        });
-    } finally {
-        setIsSavingTime(false);
-    }
-  };
-  
-  const handleUpdateEffects = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingEffects(true);
-    const effectsDocRef = doc(db, 'game-settings', 'building-effects');
-    try {
-        await setDoc(effectsDocRef, buildingEffects, { merge: true });
-        toast({
-            title: "Efek Bangunan Diperbarui",
-            description: "Logika permainan untuk efek bangunan telah disimpan.",
-        });
-    } catch (error) {
-        console.error("Error updating effects:", error);
-        toast({
-            title: "Gagal Memperbarui Efek",
-            description: "Terjadi kesalahan saat mencoba menyimpan logika permainan.",
-            variant: "destructive",
-        });
-    } finally {
-        setIsSavingEffects(false);
-    }
-  };
-
-  const handleUpdateMechanics = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingMechanics(true);
-    const mechanicsDocRef = doc(db, 'game-settings', 'game-mechanics');
-    try {
-        await setDoc(mechanicsDocRef, {
-            votingPowerDivisor: Number(votingPowerDivisor),
-        }, { merge: true });
-        toast({
-            title: "Mekanisme Diperbarui",
-            description: "Pengaturan mekanisme permainan telah disimpan.",
-        });
-    } catch (error) {
-        console.error("Error updating mechanics:", error);
-        toast({
-            title: "Gagal Memperbarui Mekanisme",
-            variant: "destructive",
-        });
-    } finally {
-        setIsSavingMechanics(false);
-    }
-  };
 
   const handleResetGame = async () => {
     setIsResetting(true);
     try {
-        const settingsDocRef = doc(db, 'game-settings', 'initial-resources');
-        const settingsDocSnap = await getDoc(settingsDocRef);
-        const initialResources = settingsDocSnap.exists() 
-            ? settingsDocSnap.data() 
-            : { money: 1000, food: 500, land: 100, unemployed: 10 };
+        const initialResources = settings.initialResources;
 
         const usersQuery = query(collection(db, 'users'), where('role', '==', 'user'));
         const usersSnapshot = await getDocs(usersQuery);
@@ -993,33 +798,17 @@ export default function AdminDashboardPage() {
     setAiResponse(null);
 
     try {
-        const settings: GameAdviceInput['settings'] = {
-            initialResources: {
-                money: initialMoney,
-                food: initialFood,
-                land: initialLand,
-                unemployed: initialUnemployed
-            },
-            globalBonuses: {
-                money: hourlyMoneyBonus,
-                food: hourlyFoodBonus,
-            },
-            costs: {
-                units: unitCosts,
-                buildings: buildingCosts,
-            },
-            timing: {
-                constructionTime: constructionTime,
-                trainingTime: trainingTime,
-            },
-            effects: buildingEffects,
+        const inputSettings: GameAdviceInput['settings'] = {
+            initialResources: settings.initialResources,
+            globalBonuses: settings.globalBonuses,
+            costs: settings.costs,
+            timing: settings.timing,
+            effects: settings.effects,
             titles: titles,
-            mechanics: {
-                votingPowerDivisor: votingPowerDivisor,
-            },
+            mechanics: settings.mechanics,
         };
         
-        const response = await getGameAdvice({ query: aiQuery, settings });
+        const response = await getGameAdvice({ query: aiQuery, settings: inputSettings });
         setAiResponse(response);
 
     } catch (error) {
@@ -1047,73 +836,48 @@ export default function AdminDashboardPage() {
         const batch = writeBatch(db);
         let changesMade = false;
 
-        const mergeState = (setter: React.Dispatch<React.SetStateAction<any>>, changes: object) => {
-            setter((prev: any) => ({ ...prev, ...changes }));
+        const applyAndSetChanges = (docName: string, changes: object | undefined) => {
+            if (changes && Object.keys(changes).length > 0) {
+                batch.set(doc(db, 'game-settings', docName), changes, { merge: true });
+                changesMade = true;
+            }
         };
-
-        if (suggestedChanges.initialResources && Object.keys(suggestedChanges.initialResources).length > 0) {
-            batch.set(doc(db, 'game-settings', 'initial-resources'), suggestedChanges.initialResources, { merge: true });
-            if (suggestedChanges.initialResources.money !== undefined) setInitialMoney(suggestedChanges.initialResources.money);
-            if (suggestedChanges.initialResources.food !== undefined) setInitialFood(suggestedChanges.initialResources.food);
-            if (suggestedChanges.initialResources.land !== undefined) setInitialLand(suggestedChanges.initialResources.land);
-            if (suggestedChanges.initialResources.unemployed !== undefined) setInitialUnemployed(suggestedChanges.initialResources.unemployed);
-            changesMade = true;
-        }
-
-        if (suggestedChanges.globalBonuses && Object.keys(suggestedChanges.globalBonuses).length > 0) {
-            batch.set(doc(db, 'game-settings', 'global-bonuses'), suggestedChanges.globalBonuses, { merge: true });
-            if (suggestedChanges.globalBonuses.money !== undefined) setHourlyMoneyBonus(suggestedChanges.globalBonuses.money);
-            if (suggestedChanges.globalBonuses.food !== undefined) setHourlyFoodBonus(suggestedChanges.globalBonuses.food);
-            changesMade = true;
-        }
-
-        if (suggestedChanges.costs) {
-            const costsDocRef = doc(db, 'game-settings', 'game-costs');
-            if (suggestedChanges.costs.units) {
-                batch.set(costsDocRef, { units: suggestedChanges.costs.units }, { merge: true });
-                mergeState(setUnitCosts, suggestedChanges.costs.units);
-                changesMade = true;
-            }
-            if (suggestedChanges.costs.buildings) {
-                batch.set(costsDocRef, { buildings: suggestedChanges.costs.buildings }, { merge: true });
-                mergeState(setBuildingCosts, suggestedChanges.costs.buildings);
-                changesMade = true;
-            }
-        }
         
-        if (suggestedChanges.timing && Object.keys(suggestedChanges.timing).length > 0) {
-            const timingUpdates: Record<string, number> = {};
-            if(suggestedChanges.timing.constructionTime !== undefined) timingUpdates.constructionTimeInHours = suggestedChanges.timing.constructionTime;
-            if(suggestedChanges.timing.trainingTime !== undefined) timingUpdates.trainingTimeInHours = suggestedChanges.timing.trainingTime;
-
-            batch.set(doc(db, 'game-settings', 'timing-rules'), timingUpdates, { merge: true });
-
-            if (suggestedChanges.timing.constructionTime !== undefined) setConstructionTime(suggestedChanges.timing.constructionTime);
-            if (suggestedChanges.timing.trainingTime !== undefined) setTrainingTime(suggestedChanges.timing.trainingTime);
-            changesMade = true;
+        applyAndSetChanges('initial-resources', suggestedChanges.initialResources);
+        applyAndSetChanges('global-bonuses', suggestedChanges.globalBonuses);
+        if (suggestedChanges.costs?.units || suggestedChanges.costs?.buildings) {
+            applyAndSetChanges('game-costs', suggestedChanges.costs);
         }
-        
-        if (suggestedChanges.effects && Object.keys(suggestedChanges.effects).length > 0) {
-            batch.set(doc(db, 'game-settings', 'building-effects'), suggestedChanges.effects, { merge: true });
-            setBuildingEffects(prev => {
-                const newEffects = JSON.parse(JSON.stringify(prev));
-                for (const [building, effectChanges] of Object.entries(suggestedChanges.effects!)) {
-                    if (!newEffects[building]) newEffects[building] = {};
-                    Object.assign(newEffects[building], effectChanges);
-                }
-                return newEffects;
-            });
-            changesMade = true;
+        if (suggestedChanges.timing) {
+             const timingUpdates: Record<string, number> = {};
+             if(suggestedChanges.timing.constructionTime !== undefined) timingUpdates.constructionTimeInHours = suggestedChanges.timing.constructionTime;
+             if(suggestedChanges.timing.trainingTime !== undefined) timingUpdates.trainingTimeInHours = suggestedChanges.timing.trainingTime;
+             applyAndSetChanges('timing-rules', timingUpdates);
         }
+        applyAndSetChanges('building-effects', suggestedChanges.effects);
+        applyAndSetChanges('game-mechanics', suggestedChanges.mechanics);
 
-        if (suggestedChanges.mechanics && suggestedChanges.mechanics.votingPowerDivisor !== undefined) {
-             batch.set(doc(db, 'game-settings', 'game-mechanics'), suggestedChanges.mechanics, { merge: true });
-             setVotingPowerDivisor(suggestedChanges.mechanics.votingPowerDivisor);
-             changesMade = true;
-        }
 
         if (changesMade) {
             await batch.commit();
+            // The context will auto-update, so we just need to re-sync local form state
+            setLocalSettings(prev => {
+                const newSettings = JSON.parse(JSON.stringify(prev)); // Deep copy
+                if(suggestedChanges.initialResources) Object.assign(newSettings.initialResources, suggestedChanges.initialResources);
+                if(suggestedChanges.globalBonuses) Object.assign(newSettings.globalBonuses, suggestedChanges.globalBonuses);
+                if(suggestedChanges.costs?.units) Object.assign(newSettings.costs.units, suggestedChanges.costs.units);
+                if(suggestedChanges.costs?.buildings) Object.assign(newSettings.costs.buildings, suggestedChanges.costs.buildings);
+                if(suggestedChanges.timing?.constructionTime !== undefined) newSettings.timing.constructionTime = suggestedChanges.timing.constructionTime;
+                if(suggestedChanges.timing?.trainingTime !== undefined) newSettings.timing.trainingTime = suggestedChanges.timing.trainingTime;
+                if(suggestedChanges.effects) {
+                     for (const [building, effectChanges] of Object.entries(suggestedChanges.effects!)) {
+                        if (!newSettings.effects[building]) newSettings.effects[building] = {};
+                        Object.assign(newSettings.effects[building], effectChanges);
+                    }
+                }
+                if(suggestedChanges.mechanics?.votingPowerDivisor !== undefined) newSettings.mechanics.votingPowerDivisor = suggestedChanges.mechanics.votingPowerDivisor;
+                return newSettings;
+            });
             toast({ title: "Perubahan Diterapkan", description: "Pengaturan permainan telah diperbarui sesuai saran AI." });
         } else {
              toast({ title: "Tidak ada perubahan", description: "AI tidak menyarankan perubahan terstruktur apa pun." });
@@ -1194,50 +958,31 @@ export default function AdminDashboardPage() {
                         {isLoadingSettings ? (
                           <p className="text-sm text-muted-foreground">Memuat pengaturan...</p>
                         ) : (
-                          <form onSubmit={handleUpdateSettings} className="space-y-4">
+                          <form onSubmit={(e) => handleUpdateSettings(e, 'initial-resources', {
+                                    money: Number(localSettings.initialResources.money),
+                                    food: Number(localSettings.initialResources.food),
+                                    land: Number(localSettings.initialResources.land),
+                                    unemployed: Number(localSettings.initialResources.unemployed),
+                                }, 'Sumber Daya Awal')} className="space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="grid gap-2">
                                   <Label htmlFor="initial-money">Uang Awal</Label>
-                                  <Input
-                                    id="initial-money"
-                                    type="number"
-                                    value={initialMoney}
-                                    onChange={(e) => setInitialMoney(Number(e.target.value))}
-                                    min="0"
-                                  />
+                                  <Input id="initial-money" type="number" value={localSettings.initialResources.money} onChange={(e) => handleSettingChange('initialResources', 'money', Number(e.target.value))} min="0" />
                                 </div>
                                 <div className="grid gap-2">
                                   <Label htmlFor="initial-food">Makanan Awal</Label>
-                                  <Input
-                                    id="initial-food"
-                                    type="number"
-                                    value={initialFood}
-                                    onChange={(e) => setInitialFood(Number(e.target.value))}
-                                    min="0"
-                                  />
+                                  <Input id="initial-food" type="number" value={localSettings.initialResources.food} onChange={(e) => handleSettingChange('initialResources', 'food', Number(e.target.value))} min="0" />
                                 </div>
                                 <div className="grid gap-2">
                                   <Label htmlFor="initial-land">Tanah Awal</Label>
-                                  <Input
-                                    id="initial-land"
-                                    type="number"
-                                    value={initialLand}
-                                    onChange={(e) => setInitialLand(Number(e.target.value))}
-                                    min="0"
-                                  />
+                                  <Input id="initial-land" type="number" value={localSettings.initialResources.land} onChange={(e) => handleSettingChange('initialResources', 'land', Number(e.target.value))} min="0" />
                                 </div>
                                 <div className="grid gap-2">
                                   <Label htmlFor="initial-unemployed">Pengangguran Awal</Label>
-                                  <Input
-                                    id="initial-unemployed"
-                                    type="number"
-                                    value={initialUnemployed}
-                                    onChange={(e) => setInitialUnemployed(Number(e.target.value))}
-                                    min="0"
-                                  />
+                                  <Input id="initial-unemployed" type="number" value={localSettings.initialResources.unemployed} onChange={(e) => handleSettingChange('initialResources', 'unemployed', Number(e.target.value))} min="0" />
                                 </div>
                             </div>
-                            <Button type="submit" className="w-full">Simpan Pengaturan</Button>
+                            <Button type="submit" className="w-full" disabled={isSaving['initial-resources']}>{isSaving['initial-resources'] ? 'Menyimpan...' : 'Simpan Pengaturan Awal'}</Button>
                           </form>
                         )}
                       </CardContent>
@@ -1254,31 +999,22 @@ export default function AdminDashboardPage() {
                         {isLoadingSettings ? (
                           <p className="text-sm text-muted-foreground">Memuat pengaturan...</p>
                         ) : (
-                          <form onSubmit={handleUpdateBonuses} className="space-y-4">
+                          <form onSubmit={(e) => handleUpdateSettings(e, 'global-bonuses', {
+                                    money: Number(localSettings.globalBonuses.money),
+                                    food: Number(localSettings.globalBonuses.food)
+                                }, 'Bonus Global')} className="space-y-4">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div className="grid gap-2">
                                   <Label htmlFor="bonus-money">Bonus Uang (per jam)</Label>
-                                  <Input
-                                    id="bonus-money"
-                                    type="number"
-                                    value={hourlyMoneyBonus}
-                                    onChange={(e) => setHourlyMoneyBonus(Number(e.target.value))}
-                                    min="0"
-                                  />
+                                  <Input id="bonus-money" type="number" value={localSettings.globalBonuses.money} onChange={(e) => handleSettingChange('globalBonuses', 'money', Number(e.target.value))} min="0" />
                                 </div>
                                 <div className="grid gap-2">
                                   <Label htmlFor="bonus-food">Bonus Makanan (per jam)</Label>
-                                  <Input
-                                    id="bonus-food"
-                                    type="number"
-                                    value={hourlyFoodBonus}
-                                    onChange={(e) => setHourlyFoodBonus(Number(e.target.value))}
-                                    min="0"
-                                  />
+                                  <Input id="bonus-food" type="number" value={localSettings.globalBonuses.food} onChange={(e) => handleSettingChange('globalBonuses', 'food', Number(e.target.value))} min="0" />
                                 </div>
                             </div>
-                            <Button type="submit" className="w-full" disabled={isSavingBonuses}>
-                                {isSavingBonuses ? 'Menyimpan...' : 'Simpan Bonus Global'}
+                            <Button type="submit" className="w-full" disabled={isSaving['global-bonuses']}>
+                                {isSaving['global-bonuses'] ? 'Menyimpan...' : 'Simpan Bonus Global'}
                             </Button>
                           </form>
                         )}
@@ -1300,63 +1036,27 @@ export default function AdminDashboardPage() {
                                     <div>
                                         <h3 className="text-lg mb-4">Biaya Bangunan</h3>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-residence">Rumah</Label>
-                                                <Input id="cost-residence" type="number" value={buildingCosts.residence} onChange={e => setBuildingCosts(prev => ({...prev, residence: Number(e.target.value)}))} min="0" />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-farm">Sawah</Label>
-                                                <Input id="cost-farm" type="number" value={buildingCosts.farm} onChange={e => setBuildingCosts(prev => ({...prev, farm: Number(e.target.value)}))} min="0" />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-fort">Benteng</Label>
-                                                <Input id="cost-fort" type="number" value={buildingCosts.fort} onChange={e => setBuildingCosts(prev => ({...prev, fort: Number(e.target.value)}))} min="0" />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-university">Kampus</Label>
-                                                <Input id="cost-university" type="number" value={buildingCosts.university} onChange={e => setBuildingCosts(prev => ({...prev, university: Number(e.target.value)}))} min="0" />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-barracks">Barak Pasukan</Label>
-                                                <Input id="cost-barracks" type="number" value={buildingCosts.barracks} onChange={e => setBuildingCosts(prev => ({...prev, barracks: Number(e.target.value)}))} min="0" />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-mobility">Mobilitas Pasukan</Label>
-                                                <Input id="cost-mobility" type="number" value={buildingCosts.mobility} onChange={e => setBuildingCosts(prev => ({...prev, mobility: Number(e.target.value)}))} min="0" />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-tambang">Tambang</Label>
-                                                <Input id="cost-tambang" type="number" value={buildingCosts.tambang} onChange={e => setBuildingCosts(prev => ({...prev, tambang: Number(e.target.value)}))} min="0" />
-                                            </div>
+                                            {Object.keys(localSettings.costs.buildings).map(key => (
+                                                <div className="grid gap-2" key={key}>
+                                                    <Label htmlFor={`cost-${key}`} className="capitalize">{buildingNameMap[key] || key}</Label>
+                                                    <Input id={`cost-${key}`} type="number" value={localSettings.costs.buildings[key as keyof BuildingCosts]} onChange={e => handleSettingChange('costs', 'buildings', Number(e.target.value), key)} min="0" />
+                                                </div>
+                                            ))}
                                         </div>
                                     </div>
                                     <div>
                                         <h3 className="text-lg mb-4">Biaya Pasukan</h3>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-attack">Pasukan Serang</Label>
-                                                <Input id="cost-attack" type="number" value={unitCosts.attack} onChange={e => setUnitCosts(prev => ({...prev, attack: Number(e.target.value)}))} min="0" />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-defense">Pasukan Bertahan</Label>
-                                                <Input id="cost-defense" type="number" value={unitCosts.defense} onChange={e => setUnitCosts(prev => ({...prev, defense: Number(e.target.value)}))} min="0" />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-elite">Pasukan Elit</Label>
-                                                <Input id="cost-elite" type="number" value={unitCosts.elite} onChange={e => setUnitCosts(prev => ({...prev, elite: Number(e.target.value)}))} min="0" />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-raider">Perampok</Label>
-                                                <Input id="cost-raider" type="number" value={unitCosts.raider} onChange={e => setUnitCosts(prev => ({...prev, raider: Number(e.target.value)}))} min="0" />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label htmlFor="cost-spy">Mata-mata</Label>
-                                                <Input id="cost-spy" type="number" value={unitCosts.spy} onChange={e => setUnitCosts(prev => ({...prev, spy: Number(e.target.value)}))} min="0" />
-                                            </div>
+                                            {Object.keys(localSettings.costs.units).map(key => (
+                                                 <div className="grid gap-2" key={key}>
+                                                    <Label htmlFor={`cost-${key}`} className="capitalize">{unitNameMap[key as keyof UnitCosts] || key}</Label>
+                                                    <Input id={`cost-${key}`} type="number" value={localSettings.costs.units[key as keyof UnitCosts]} onChange={e => handleSettingChange('costs', 'units', Number(e.target.value), key)} min="0" />
+                                                </div>
+                                            ))}
                                         </div>
                                     </div>
-                                    <Button type="submit" className="w-full" disabled={isSavingCosts}>
-                                        {isSavingCosts ? 'Menyimpan...' : 'Simpan Biaya'}
+                                    <Button type="submit" className="w-full" disabled={isSaving['costs']}>
+                                        {isSaving['costs'] ? 'Menyimpan...' : 'Simpan Biaya'}
                                     </Button>
                                 </form>
                             )}
@@ -1374,31 +1074,22 @@ export default function AdminDashboardPage() {
                             {isLoadingSettings ? (
                                 <p className="text-sm text-muted-foreground">Memuat pengaturan waktu...</p>
                             ) : (
-                                <form onSubmit={handleUpdateTimeSettings} className="space-y-4">
+                                <form onSubmit={(e) => handleUpdateSettings(e, 'timing-rules', {
+                                    constructionTimeInHours: Number(localSettings.timing.constructionTime),
+                                    trainingTimeInHours: Number(localSettings.timing.trainingTime),
+                                }, 'Pengaturan Waktu')} className="space-y-4">
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div className="grid gap-2">
                                             <Label htmlFor="construction-time">Waktu Konstruksi (jam)</Label>
-                                            <Input
-                                                id="construction-time"
-                                                type="number"
-                                                value={constructionTime}
-                                                onChange={(e) => setConstructionTime(Number(e.target.value))}
-                                                min="0"
-                                            />
+                                            <Input id="construction-time" type="number" value={localSettings.timing.constructionTime} onChange={(e) => handleSettingChange('timing', 'constructionTime', Number(e.target.value))} min="0" />
                                         </div>
                                         <div className="grid gap-2">
                                             <Label htmlFor="training-time">Waktu Pelatihan (jam)</Label>
-                                            <Input
-                                                id="training-time"
-                                                type="number"
-                                                value={trainingTime}
-                                                onChange={(e) => setTrainingTime(Number(e.target.value))}
-                                                min="0"
-                                            />
+                                            <Input id="training-time" type="number" value={localSettings.timing.trainingTime} onChange={(e) => handleSettingChange('timing', 'trainingTime', Number(e.target.value))} min="0" />
                                         </div>
                                     </div>
-                                    <Button type="submit" className="w-full" disabled={isSavingTime}>
-                                        {isSavingTime ? 'Menyimpan...' : 'Simpan Pengaturan Waktu'}
+                                    <Button type="submit" className="w-full" disabled={isSaving['timing-rules']}>
+                                        {isSaving['timing-rules'] ? 'Menyimpan...' : 'Simpan Pengaturan Waktu'}
                                     </Button>
                                 </form>
                             )}
@@ -1416,12 +1107,12 @@ export default function AdminDashboardPage() {
                             {isLoadingSettings ? (
                                 <p className="text-sm text-muted-foreground">Memuat pengaturan logika...</p>
                             ) : (
-                                <form onSubmit={handleUpdateEffects} className="space-y-6">
-                                    {Object.keys(buildingEffects).map((buildingKey) => (
+                                <form onSubmit={(e) => handleUpdateSettings(e, 'building-effects', localSettings.effects, 'Efek Bangunan')} className="space-y-6">
+                                    {Object.keys(localSettings.effects).map((buildingKey) => (
                                         <div key={buildingKey}>
                                             <h3 className="text-lg mb-2">{buildingNameMap[buildingKey as keyof BuildingEffects] || buildingKey}</h3>
                                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 border p-4 rounded-md">
-                                                {Object.keys(buildingEffects[buildingKey as keyof BuildingEffects]).map(effectKey => (
+                                                {Object.keys(localSettings.effects[buildingKey as keyof BuildingEffects]).map(effectKey => (
                                                     <div key={effectKey} className="grid gap-2">
                                                         <Label htmlFor={`effect-${buildingKey}-${effectKey}`} className='text-sm'>
                                                           {effectNameMap[effectKey] || effectKey}
@@ -1429,14 +1120,8 @@ export default function AdminDashboardPage() {
                                                         <Input 
                                                             id={`effect-${buildingKey}-${effectKey}`} 
                                                             type="number" 
-                                                            value={buildingEffects[buildingKey as keyof BuildingEffects][effectKey as keyof typeof buildingEffects[keyof BuildingEffects]]}
-                                                            onChange={e => setBuildingEffects(prev => ({
-                                                                ...prev,
-                                                                [buildingKey]: {
-                                                                    ...prev[buildingKey as keyof BuildingEffects],
-                                                                    [effectKey]: Number(e.target.value)
-                                                                }
-                                                            }))}
+                                                            value={localSettings.effects[buildingKey as keyof BuildingEffects][effectKey as keyof typeof localSettings.effects[keyof BuildingEffects]]}
+                                                            onChange={e => handleEffectChange(buildingKey as keyof BuildingEffects, effectKey as keyof BuildingEffects[keyof BuildingEffects], Number(e.target.value))}
                                                             min="0"
                                                         />
                                                     </div>
@@ -1444,8 +1129,8 @@ export default function AdminDashboardPage() {
                                             </div>
                                         </div>
                                     ))}
-                                    <Button type="submit" className="w-full" disabled={isSavingEffects}>
-                                        {isSavingEffects ? 'Menyimpan...' : 'Simpan Logika Permainan'}
+                                    <Button type="submit" className="w-full" disabled={isSaving['building-effects']}>
+                                        {isSaving['building-effects'] ? 'Menyimpan...' : 'Simpan Logika Permainan'}
                                     </Button>
                                 </form>
                             )}
@@ -1677,22 +1362,24 @@ export default function AdminDashboardPage() {
                             {isLoadingSettings ? (
                                 <p className="text-sm text-muted-foreground">Memuat pengaturan mekanisme...</p>
                             ) : (
-                                <form onSubmit={handleUpdateMechanics} className="space-y-4">
+                                <form onSubmit={(e) => handleUpdateSettings(e, 'game-mechanics', {
+                                    votingPowerDivisor: Number(localSettings.mechanics.votingPowerDivisor)
+                                }, 'Mekanisme Permainan')} className="space-y-4">
                                     <div className="grid gap-2">
                                         <Label htmlFor="voting-divisor">Pembagi Hak Pilih</Label>
                                         <Input
                                             id="voting-divisor"
                                             type="number"
-                                            value={votingPowerDivisor}
-                                            onChange={(e) => setVotingPowerDivisor(Number(e.target.value))}
+                                            value={localSettings.mechanics.votingPowerDivisor}
+                                            onChange={(e) => handleSettingChange('mechanics', 'votingPowerDivisor', Number(e.target.value))}
                                             min="1"
                                         />
                                          <p className="text-xs text-muted-foreground">
                                             Jumlah tanah yang dibutuhkan untuk mendapatkan 1 hak pilih dalam pemilihan pemimpin aliansi.
                                          </p>
                                     </div>
-                                    <Button type="submit" className="w-full" disabled={isSavingMechanics}>
-                                        {isSavingMechanics ? 'Menyimpan...' : 'Simpan Mekanisme'}
+                                    <Button type="submit" className="w-full" disabled={isSaving['game-mechanics']}>
+                                        {isSaving['game-mechanics'] ? 'Menyimpan...' : 'Simpan Mekanisme'}
                                     </Button>
                                 </form>
                             )}
@@ -2298,7 +1985,3 @@ export default function AdminDashboardPage() {
     </TooltipProvider>
   );
 }
-
-  
-
-  
