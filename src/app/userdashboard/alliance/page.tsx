@@ -205,7 +205,7 @@ export default function AllianceAndWorldPage() {
     const getFullMemberNameString = (member: AllianceMember) => {
         if (!member) return '';
         const title = getTitleNameForPride(member.pride);
-        return `${member.prideName} (${title} - {member.province})`;
+        return `${title} - ${member.prideName} (${member.province})`;
     }
 
     const getMemberJabatan = (memberId: string, leaderId: string | null) => {
@@ -1050,7 +1050,7 @@ export default function AllianceAndWorldPage() {
                                     {searchedAllianceMembers.length > 0 ? (
                                         searchedAllianceMembers.map(member => (
                                             <TableRow key={member.id}>
-                                                <TableCell className="flex items-center gap-2">{member.id === searchedAllianceLeaderId && <Crown className="h-4 w-4 text-yellow-500" />}{member.prideName}</TableCell>
+                                                <TableCell className="flex items-center gap-2">{member.id === searchedAllianceLeaderId && <Crown className="h-4 w-4 text-yellow-500" />}{getFullMemberNameString(member)}</TableCell>
                                                 <TableCell>{getMemberJabatan(member.id, searchedAllianceLeaderId)}</TableCell>
                                                 <TableCell className="text-right">{member.pride.toLocaleString()}</TableCell>
                                                 <TableCell className="text-right">{member.land.toLocaleString()}</TableCell>
