@@ -1,104 +1,75 @@
-
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions to make rules more readable.
+    // Helper functions
     function isAuth() {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return isAuth() && request.auth.token.admin == true;
-    }
-
-    function isOwner(userId) {
-      return isAuth() && request.auth.uid == userId;
-    }
-
-    // Default rule: Deny all access to prevent accidental exposure.
+    // --- Global Rules ---
+    // By default, deny all reads and writes.
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // --- Game-wide Public Data ---
-    // Allow any authenticated user to read game settings, titles, and alliances.
-    // Only admins can write to them.
-    match /game-settings/{docId} {
-      allow read: if isAuth();
-      allow write: if isAdmin();
-    }
+    // --- Collection Rules ---
 
-    match /titles/{docId} {
-      allow read: if isAuth();
-      allow write: if isAdmin();
-    }
-
-    match /alliances/{docId} {
-      allow read: if isAuth();
-      allow write: if isAdmin();
-    }
-    
-    match /wars/{docId} {
-      allow read: if isAuth();
-      allow write: if isAdmin(); // Only admins can create/delete wars directly for now.
-    }
-
-    // --- User Data ---
-    // Users can read any other user's profile.
-    // Users can only create and update their OWN profile.
+    // USER DATA: Users can read/write their own data, others can only read.
     match /users/{userId} {
+      allow read, write: if isAuth() && request.auth.uid == userId;
       allow read: if isAuth();
-      allow create, update: if isOwner(userId);
-      // Deletion is a sensitive operation, restrict to admin for now.
-      allow delete: if isAdmin();
     }
     
-    // --- Dynamic / Transactional Data ---
-    
-    // Any authenticated user can create their own vote document.
-    // Reading all votes is restricted to prevent tactical analysis.
-    match /votes/{userId} {
-        allow read, create, update: if isOwner(userId);
+    // GAME SETTINGS: Publicly readable by any authenticated user for game logic.
+    match /game-settings/{docId} {
+        allow read: if isAuth();
+        // Allow write only for admins in the future.
+        // allow write: if isAdmin(); 
+    }
+
+    // TITLES, ALLIANCES: Publicly readable data.
+    match /titles/{titleId} {
+        allow read: if isAuth();
+    }
+    match /alliances/{allianceId} {
+        allow read: if isAuth();
     }
     
-    // Users can only read reports where their UID is in the 'involvedUsers' array.
+    // ACTIVITY LOG, REPORTS: Users can only read their own.
+    match /activityLog/{logId} {
+      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+    }
     match /reports/{reportId} {
-        allow read, update: if isAuth() && resource.data.involvedUsers.hasAny([request.auth.uid]);
-        // Write access should be handled by server-side logic (Cloud Functions) or a secure admin panel.
-        allow create, delete: if false; 
+        allow read: if isAuth() && request.auth.uid in resource.data.involvedUsers;
+    }
+
+    // VOTES: Users can only create/update their own vote.
+    match /votes/{userId} {
+      allow read, write: if isAuth() && request.auth.uid == userId;
     }
     
-    // --- Queue Collections ---
-    // Users can only create queue items for themselves.
-    // Reading/deleting is handled by server-side logic.
+    // QUEUES: Users can only create/read their own queue items.
     match /constructionQueue/{jobId} {
-      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
-      allow read, update, delete: if false;
+        allow read, create: if isAuth() && request.resource.data.userId == request.auth.uid;
     }
     match /trainingQueue/{jobId} {
-      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
-      allow read, update, delete: if false;
+        allow read, create: if isAuth() && request.resource.data.userId == request.auth.uid;
     }
-     match /attackQueue/{jobId} {
-      allow create: if isAuth() && request.resource.data.attackerId == request.auth.uid;
-      allow read, update, delete: if false;
+    match /attackQueue/{jobId} {
+        allow read, create: if isAuth() && request.resource.data.attackerId == request.auth.uid;
     }
-     match /returnQueue/{jobId} {
-      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
-      allow read, update, delete: if false;
+    match /returnQueue/{jobId} {
+        allow read, create: if isAuth() && request.resource.data.userId == request.auth.uid;
     }
-     match /transportQueue/{jobId} {
-      allow create: if isAuth() && request.resource.data.senderId == request.auth.uid;
-      allow read, update, delete: if false;
+    match /transportQueue/{jobId} {
+        allow read, create: if isAuth() && (request.resource.data.senderId == request.auth.uid || request.resource.data.recipientId == request.auth.uid);
     }
     
-    // --- Activity Log ---
-    // Users can create their own log entries. Reading is restricted.
-    match /activityLog/{logId} {
-      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
-      allow read, update, delete: if false;
+    // WARS: Readable by authenticated users.
+    match /wars/{warId} {
+        allow read: if isAuth();
     }
   }
 }
