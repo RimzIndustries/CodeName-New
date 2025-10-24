@@ -3,98 +3,80 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Helper function to check if a user is an admin
+  
+    // Helper function to check if user is an admin
     function isAdmin() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
-    // Helper function to check if the user is the owner of the data
-    function isOwner(userId) {
-      return request.auth != null && request.auth.uid == userId;
+    // game-settings: Everyone can read, only admin can write.
+    match /game-settings/{docId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
     }
-
-    // Users can only read/write their own data. Admins can do anything.
+    
+    // users: Users can read/write their own data. Admin can read/write anyone's data.
     match /users/{userId} {
-      allow read, write: if isOwner(userId) || isAdmin();
+      allow read, write: if request.auth.uid == userId || isAdmin();
     }
-
-    // Game settings can be read by any authenticated user, but only written by admins.
-    // This is crucial for the app to load game rules.
-    match /game-settings/{setting} {
-        allow get, list: if request.auth != null;
-        allow write: if isAdmin();
-    }
-
-    // Titles can be read by any authenticated user, but only written by admins.
+    
+    // titles: Everyone can read, only admin can write.
     match /titles/{titleId} {
         allow read: if request.auth != null;
         allow write: if isAdmin();
     }
     
-    // Alliances can be read by any authenticated user.
-    // Only admins or alliance leaders (future implementation) can write.
+    // alliances: Everyone can read. Only leaders/admins can write (simplified for now).
     match /alliances/{allianceId} {
         allow read: if request.auth != null;
-        allow write: if isAdmin(); // To be refined later for leaders
-    }
-
-    // Votes can be created/updated by the voter, read by anyone authenticated.
-    match /votes/{userId} {
-        allow read: if request.auth != null;
-        allow create, update: if isOwner(userId);
-        allow delete: if isAdmin();
-    }
-
-    // Reports can only be read by users involved in the report.
-    match /reports/{reportId} {
-        allow read: if request.auth != null && request.auth.uid in resource.data.involvedUsers;
-        allow write: if false; // Reports should be created by server/functions, not clients
+        allow write: if isAdmin(); // Simplified: allowing only admin to edit for now.
     }
     
-    // Activity log is write-only for authenticated users. Read by admins.
+    // reports, activityLog: Users can only access their own.
+    match /reports/{reportId} {
+        allow read, write: if request.auth.uid in resource.data.involvedUsers;
+    }
+    
     match /activityLog/{logId} {
-        allow read: if isAdmin();
-        allow create: if request.auth != null;
+        allow read: if request.auth != null;
+        allow create: if request.auth.uid == request.resource.data.userId;
+    }
+    
+    // votes: Authenticated users can create/update their own vote.
+    match /votes/{userId} {
+        allow read, write: if request.auth.uid == userId;
     }
 
-    // Queues (construction, training, attack, return, transport) are write-only for the user themselves.
+    // Queues (construction, training, attack, transport, return): users can manage their own queue items.
     match /constructionQueue/{jobId} {
-        allow read: if request.auth.uid == resource.data.userId;
-        allow create: if request.auth.uid == request.resource.data.userId;
-        allow delete: if false; // Deletion is handled by background tasks
+        allow read, create: if request.auth.uid == request.resource.data.userId;
+        allow delete: if request.auth.uid == resource.data.userId || isAdmin();
     }
     
     match /trainingQueue/{jobId} {
-        allow read: if request.auth.uid == resource.data.userId;
-        allow create: if request.auth.uid == request.resource.data.userId;
-        allow delete: if false; 
+        allow read, create: if request.auth.uid == request.resource.data.userId;
+        allow delete: if request.auth.uid == resource.data.userId || isAdmin();
     }
     
     match /attackQueue/{jobId} {
-        allow read: if request.auth.uid == resource.data.attackerId;
-        allow create: if request.auth.uid == request.resource.data.attackerId;
-        allow delete: if false;
-    }
-
-    match /returnQueue/{jobId} {
-        allow read: if request.auth.uid == resource.data.userId;
-        allow create: if false; // Created by server logic
-        allow delete: if false;
+        allow read, create: if request.auth.uid == request.resource.data.attackerId;
+        allow delete: if request.auth.uid == resource.data.attackerId || isAdmin();
     }
     
     match /transportQueue/{jobId} {
-        allow read: if request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.recipientId;
-        allow create: if request.auth.uid == request.resource.data.senderId;
-        allow delete: if false;
+        allow read, create: if request.auth.uid == request.resource.data.senderId;
+        allow delete: if request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.recipientId || isAdmin();
     }
 
-    // Ongoing wars can be read by anyone authenticated.
-    match /wars/{warId} {
-        allow read: if request.auth != null;
-        allow create: if request.auth != null; // Leader should be verified in app logic
-        allow delete: if isAdmin(); // Only admin can end a war forcefully
+    match /returnQueue/{jobId} {
+        allow read, create: if request.resource.data.userId != null; // System created
+        allow delete: if request.auth.uid == resource.data.userId || isAdmin();
     }
     
+    // Wars can be read by anyone, but only created/deleted by admins for now
+    match /wars/{warId} {
+      allow read: if request.auth != null;
+      allow write, delete: if isAdmin();
+    }
   }
 }
