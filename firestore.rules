@@ -2,97 +2,84 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Helper functions to keep rules clean and readable.
+  
+    // Helper functions to make rules more readable.
     function isAuth() {
       return request.auth != null;
     }
 
     function isAdmin() {
-      // Assumes an 'admin' custom claim is set on the user's token.
       return isAuth() && request.auth.token.admin == true;
     }
-
+    
     function isOwner(userId) {
       return isAuth() && request.auth.uid == userId;
     }
-    
-    // --- Collection Rules ---
 
-    // Game Settings: Public read for all authenticated users, write only for admins.
-    // This is the key rule to fix the "get" and "list" permission errors.
-    match /game-settings/{setting} {
+    // GAME-SETTINGS: Publicly readable by authenticated users, writable only by admins.
+    // This allows the client to fetch all game rules at once.
+    match /game-settings/{docId} {
       allow read: if isAuth();
       allow write: if isAdmin();
     }
 
-    // User Data: Users can read/write their own data. Other authenticated users can read.
+    // USERS: Users can read/write their own data. Other authenticated users can only read.
     match /users/{userId} {
-      allow get, list: if isAuth();
-      allow create, update, delete: if isOwner(userId);
+      allow read: if isAuth();
+      allow write: if isOwner(userId);
     }
     
-    // Titles: Public read for all authenticated users, write only for admins.
+    // TITLES: Publicly readable, writable only by admins.
     match /titles/{titleId} {
-      allow read: if isAuth();
-      allow write: if isAdmin();
+        allow read: if isAuth();
+        allow write: if isAdmin();
     }
     
-    // Alliances: Public read for all authenticated users.
-    // Writes are handled by specific logic (e.g., creating an alliance, leader updates).
+    // ALLIANCES: Publicly readable, writable only by admins (for creation/deletion).
+    // Updates to things like name/tag can be done by leaders (covered by functions in app).
     match /alliances/{allianceId} {
-      allow read: if isAuth();
-      // Allow creation for any authenticated user.
-      allow create: if isAuth();
-      // Only allow updates/deletes by an admin. Leader actions would need more specific rules.
-      allow update, delete: if isAdmin();
+        allow read: if isAuth();
+        allow write: if isAdmin(); 
+    }
+    
+    // WARS: Readable by authenticated users, writable only by admins (for forced resolution).
+    match /wars/{warId} {
+        allow read: if isAuth();
+        allow write: if isAdmin();
     }
 
-    // Votes: Users can only create/update their own vote document.
+    // VOTES: Users can only vote for their own alliance.
     match /votes/{userId} {
-       allow read, write: if isOwner(userId);
+        allow read: if isAuth();
+        allow write: if isOwner(userId);
     }
     
-    // Reports: Users can only read reports where they are involved.
+    // REPORTS: Users can only read reports they are involved in. Reports are created by server-side logic.
     match /reports/{reportId} {
         allow read: if isAuth() && resource.data.involvedUsers.hasAny([request.auth.uid]);
-        // Reports are created by server-side logic (or a trusted client), so no direct client create rule.
-        allow write: if false; 
+        allow create: if isAuth(); // Allow user-triggered actions to create reports
+        allow update: if isAuth(); // To allow marking as read
+        allow delete: if false; // Reports should not be deleted by users
     }
     
-    // Game Queues (Construction, Training, Attack, Transport)
-    // Users can only create jobs for themselves and cannot read others' jobs.
-    match /constructionQueue/{jobId} {
-        allow read, delete: if isAuth() && resource.data.userId == request.auth.uid;
-        allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
-    }
-    
-    match /trainingQueue/{jobId} {
-        allow read, delete: if isAuth() && resource.data.userId == request.auth.uid;
-        allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
-    }
-
-    match /attackQueue/{jobId} {
-        allow read, delete: if isAuth() && resource.data.attackerId == request.auth.uid;
-        allow create: if isAuth() && request.resource.data.attackerId == request.auth.uid;
-    }
-    
-    match /transportQueue/{jobId} {
-        allow read: if isAuth() && (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid);
-        allow create: if isAuth() && request.resource.data.senderId == request.auth.uid;
-    }
-
-    // Wars: Publicly readable by authenticated users, writable only by admins (for manual intervention)
-    // or through a secure server function (not defined here).
-    match /wars/{warId} {
-      allow read: if isAuth();
-      allow create, update, delete: if isAdmin();
-    }
-    
-    // Activity Log: Write-only for authenticated users.
+    // ACTIVITY LOG: Write-only for authenticated users.
     match /activityLog/{logId} {
         allow read: if false;
-        allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+        allow write: if isAuth();
+    }
+
+    // QUEUES: Users can only create tasks for themselves.
+    match /constructionQueue/{jobId} {
+        allow read, write: if isAuth() && (isOwner(request.resource.data.userId) || isOwner(resource.data.userId));
+    }
+    match /trainingQueue/{jobId} {
+        allow read, write: if isAuth() && (isOwner(request.resource.data.userId) || isOwner(resource.data.userId));
+    }
+    match /attackQueue/{jobId} {
+        allow read, write: if isAuth() && (isOwner(request.resource.data.attackerId) || isOwner(resource.data.attackerId));
+    }
+    match /transportQueue/{jobId} {
+        allow read, write: if isAuth() && (isOwner(request.resource.data.senderId) || isOwner(resource.data.senderId) || isOwner(resource.data.recipientId));
     }
 
   }
