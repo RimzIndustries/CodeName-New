@@ -1,13 +1,14 @@
+
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
   
-    // Helper functions to make rules more readable.
+    // Helper functions to make rules cleaner
     function isAuth() {
       return request.auth != null;
     }
-
+    
     function isAdmin() {
       return isAuth() && request.auth.token.admin == true;
     }
@@ -16,71 +17,84 @@ service cloud.firestore {
       return isAuth() && request.auth.uid == userId;
     }
 
-    // GAME-SETTINGS: Publicly readable by authenticated users, writable only by admins.
-    // This allows the client to fetch all game rules at once.
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // GAME-SETTINGS: Allow any authenticated user to read, only admins to write
     match /game-settings/{docId} {
       allow read: if isAuth();
       allow write: if isAdmin();
     }
 
-    // USERS: Users can read/write their own data. Other authenticated users can only read.
+    // USERS: Users can read/write their own data. Others can read public data.
     match /users/{userId} {
       allow read: if isAuth();
       allow write: if isOwner(userId);
     }
     
-    // TITLES: Publicly readable, writable only by admins.
+    // TITLES: Publicly readable, only admin writable
     match /titles/{titleId} {
-        allow read: if isAuth();
-        allow write: if isAdmin();
+      allow read: if isAuth();
+      allow write: if isAdmin();
     }
     
-    // ALLIANCES: Publicly readable, writable only by admins (for creation/deletion).
-    // Updates to things like name/tag can be done by leaders (covered by functions in app).
+    // ALLIANCES: Publicly readable, only admin can create/delete, members can interact
     match /alliances/{allianceId} {
-        allow read: if isAuth();
-        allow write: if isAdmin(); 
+      allow read: if isAuth();
+      allow create, delete: if isAdmin();
+      allow update: if isAuth() && (isAdmin() || (resource.data.leaderId == request.auth.uid));
     }
     
-    // WARS: Readable by authenticated users, writable only by admins (for forced resolution).
+    // VOTES: Users can only vote for their own alliance
+    match /votes/{userId} {
+      allow read: if isAuth();
+      allow write: if isOwner(userId) && request.resource.data.allianceId == get(/databases/$(database)/documents/users/$(userId)).data.allianceId;
+    }
+    
+    // ACTIVITY LOG: Write-only for authenticated users
+    match /activityLog/{logId} {
+      allow create: if isAuth();
+      allow read, update, delete: if false;
+    }
+    
+    // REPORTS: Users can only read reports they are involved in
+    match /reports/{reportId} {
+        allow read: if isAuth() && request.auth.uid in resource.data.involvedUsers;
+        allow write: if false; // Reports are created by server-side logic (or here, via batch writes in secure contexts)
+    }
+    
+    // QUEUES: Users can only create entries for themselves. No one can read/update/delete directly.
+    match /constructionQueue/{jobId} {
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow read, update, delete: if false;
+    }
+    
+    match /trainingQueue/{jobId} {
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow read, update, delete: if false;
+    }
+    
+    match /attackQueue/{jobId} {
+      allow create: if isAuth() && request.resource.data.attackerId == request.auth.uid;
+      allow read, update, delete: if false;
+    }
+    
+    match /returnQueue/{jobId} {
+      // Return queue should only be written by a trusted server process, but for client-side logic we lock it down.
+      allow read, write: if false;
+    }
+
+    match /transportQueue/{jobId} {
+        allow create: if isAuth() && request.resource.data.senderId == request.auth.uid;
+        allow read, update, delete: if false;
+    }
+    
     match /wars/{warId} {
         allow read: if isAuth();
-        allow write: if isAdmin();
+        allow create, delete: if isAdmin();
+        allow update: if false;
     }
-
-    // VOTES: Users can only vote for their own alliance.
-    match /votes/{userId} {
-        allow read: if isAuth();
-        allow write: if isOwner(userId);
-    }
-    
-    // REPORTS: Users can only read reports they are involved in. Reports are created by server-side logic.
-    match /reports/{reportId} {
-        allow read: if isAuth() && resource.data.involvedUsers.hasAny([request.auth.uid]);
-        allow create: if isAuth(); // Allow user-triggered actions to create reports
-        allow update: if isAuth(); // To allow marking as read
-        allow delete: if false; // Reports should not be deleted by users
-    }
-    
-    // ACTIVITY LOG: Write-only for authenticated users.
-    match /activityLog/{logId} {
-        allow read: if false;
-        allow write: if isAuth();
-    }
-
-    // QUEUES: Users can only create tasks for themselves.
-    match /constructionQueue/{jobId} {
-        allow read, write: if isAuth() && (isOwner(request.resource.data.userId) || isOwner(resource.data.userId));
-    }
-    match /trainingQueue/{jobId} {
-        allow read, write: if isAuth() && (isOwner(request.resource.data.userId) || isOwner(resource.data.userId));
-    }
-    match /attackQueue/{jobId} {
-        allow read, write: if isAuth() && (isOwner(request.resource.data.attackerId) || isOwner(resource.data.attackerId));
-    }
-    match /transportQueue/{jobId} {
-        allow read, write: if isAuth() && (isOwner(request.resource.data.senderId) || isOwner(resource.data.senderId) || isOwner(resource.data.recipientId));
-    }
-
   }
 }
