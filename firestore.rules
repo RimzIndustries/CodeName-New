@@ -4,68 +4,58 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Aturan untuk data pengguna
+    // Users can read and write to their own document
     match /users/{userId} {
-      // Pengguna dapat membaca dan menulis data mereka sendiri, tetapi tidak bisa menghapus akun mereka dari aturan ini.
-      // Admin dapat membaca data pengguna mana pun.
-      allow read: if request.auth != null && (request.auth.uid == userId || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
-      allow create: if request.auth != null;
-      allow update: if request.auth != null && request.auth.uid == userId;
-      // Aturan hapus sengaja dibiarkan kosong untuk mencegah penghapusan yang tidak disengaja.
-      // Penghapusan harus ditangani oleh fungsi Cloud atau dari konsol Firebase.
-      allow delete: if false;
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Aturan untuk pengaturan permainan
-    match /game-settings/{setting} {
-      // Semua pengguna yang terautentikasi dapat membaca pengaturan permainan.
+    // Authenticated users can read the game settings, but not write to them.
+    match /game-settings/{docId} {
       allow read: if request.auth != null;
-      // Hanya admin yang dapat menulis/mengubah pengaturan permainan.
-      allow write: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-
-    // Aturan untuk gelar
-    match /titles/{titleId} {
-        // Semua pengguna yang terautentikasi dapat membaca gelar
-        allow read: if request.auth != null;
-        // Hanya admin yang dapat membuat, mengubah, atau menghapus gelar
-        allow write: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-
-    // Aturan untuk aliansi
-    match /alliances/{allianceId} {
-        // Semua pengguna yang terautentikasi dapat membaca data aliansi
-        allow read: if request.auth != null;
-        // Hanya admin yang bisa membuat/menghapus. Pemimpin bisa update.
-        allow create, delete: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-        allow update: if request.auth != null; // Diperlonggar sementara
+      allow write: if false; // Nobody can write from the client
     }
     
-    // Aturan untuk suara
+    // Other collections can be added here
+    match /titles/{titleId} {
+      allow read: if request.auth != null;
+      allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    match /alliances/{allianceId} {
+      allow read, write: if request.auth != null;
+    }
+
     match /votes/{userId} {
-        // Pengguna hanya bisa memberikan/mengubah suara mereka sendiri
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
-
-    // Aturan untuk laporan
+    
     match /reports/{reportId} {
-        // Pengguna hanya bisa membaca laporan yang melibatkan mereka
-        allow read, update: if request.auth != null && request.auth.uid in resource.data.involvedUsers;
-        allow create: if request.auth != null;
+      allow read: if request.auth != null && request.auth.uid in resource.data.involvedUsers;
+      allow create: if request.auth != null;
     }
 
-    // Aturan untuk antrian (konstruksi, pelatihan, serangan)
-    match /{queue}/{jobId} {
-        allow read, create, delete: if request.auth != null;
-        // Aturan yang lebih spesifik bisa ditambahkan jika diperlukan,
-        // misalnya: allow create: if request.auth.uid == request.resource.data.userId;
+    match /attackQueue/{jobId} {
+      allow read, write: if request.auth != null && request.auth.uid == request.resource.data.attackerId;
     }
 
-    // Aturan untuk log aktivitas
+    match /constructionQueue/{jobId} {
+       allow read, write: if request.auth != null && request.auth.uid == request.resource.data.userId;
+    }
+    
+    match /trainingQueue/{jobId} {
+       allow read, write: if request.auth != null && request.auth.uid == request.resource.data.userId;
+    }
+
+    match /returnQueue/{jobId} {
+      allow read, write: if request.auth != null && request.auth.uid == request.resource.data.userId;
+    }
+    
+    match /transportQueue/{jobId} {
+      allow read, write: if request.auth != null;
+    }
+
     match /activityLog/{logId} {
-        // Log hanya bisa dibuat
-        allow create: if request.auth != null;
-        allow read, write, delete: if false; // Tidak ada yang bisa membaca/mengubah log setelah dibuat
+      allow read, create: if request.auth != null;
     }
 
   }
