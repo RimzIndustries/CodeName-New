@@ -1,8 +1,8 @@
 
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
@@ -117,50 +117,97 @@ const GameSettingsContext = createContext<GameSettingsContextType>({
   setSettings: () => {},
 });
 
+const SETTINGS_DOC_IDS = [
+    'initial-resources',
+    'global-bonuses',
+    'game-costs',
+    'timing-rules',
+    'building-effects',
+    'game-mechanics',
+    'admin-info'
+];
+
+
 export function GameSettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<GameSettings>(defaultSettings);
   const [isLoading, setIsLoading] = useState(true);
 
+  const handleDocUpdate = useCallback((docId: string, data: any) => {
+    setSettings(prev => {
+        const newSettings = { ...prev };
+        switch(docId) {
+            case 'initial-resources':
+                newSettings.initialResources = data;
+                break;
+            case 'global-bonuses':
+                newSettings.globalBonuses = data;
+                break;
+            case 'game-costs':
+                newSettings.costs = data;
+                break;
+            case 'timing-rules':
+                newSettings.timing = {
+                    constructionTime: data.constructionTimeInHours,
+                    trainingTime: data.trainingTimeInHours,
+                };
+                break;
+            case 'building-effects':
+                newSettings.effects = data;
+                break;
+            case 'game-mechanics':
+                newSettings.mechanics = data;
+                break;
+            case 'admin-info':
+                newSettings.adminMessage = data.message;
+                break;
+        }
+        return newSettings;
+    });
+  }, []);
+
+
   useEffect(() => {
-    const settingsCollectionRef = collection(db, 'game-settings');
-    
-    const unsubscribe = onSnapshot(settingsCollectionRef, (snapshot) => {
-        setIsLoading(true);
-        const fetchedSettings: { [key: string]: any } = {};
-        
-        snapshot.forEach(doc => {
-            fetchedSettings[doc.id] = doc.data();
-        });
+    setIsLoading(true);
+    const unsubscribes: (() => void)[] = [];
+    let loadedCount = 0;
 
-        setSettings(prev => {
-            const newSettings = { ...defaultSettings, ...prev };
-            if (fetchedSettings['initial-resources']) newSettings.initialResources = fetchedSettings['initial-resources'];
-            if (fetchedSettings['global-bonuses']) newSettings.globalBonuses = fetchedSettings['global-bonuses'];
-            if (fetchedSettings['game-costs']) newSettings.costs = fetchedSettings['game-costs'];
-            if (fetchedSettings['timing-rules']) newSettings.timing = {
-                constructionTime: fetchedSettings['timing-rules'].constructionTimeInHours,
-                trainingTime: fetchedSettings['timing-rules'].trainingTimeInHours,
-            };
-            if (fetchedSettings['building-effects']) newSettings.effects = fetchedSettings['building-effects'];
-            if (fetchedSettings['game-mechanics']) newSettings.mechanics = fetchedSettings['game-mechanics'];
-            if (fetchedSettings['admin-info']) newSettings.adminMessage = fetchedSettings['admin-info'].message;
-            return newSettings;
-        });
+    SETTINGS_DOC_IDS.forEach(docId => {
+        const docRef = doc(db, 'game-settings', docId);
+        const unsubscribe = onSnapshot(docRef, 
+            (docSnap) => {
+                if (docSnap.exists()) {
+                    handleDocUpdate(docId, docSnap.data());
+                } else {
+                    console.warn(`Game settings document not found: ${docId}`);
+                }
+                
+                // Only stop loading when all documents have been attempted
+                loadedCount++;
+                if (loadedCount === SETTINGS_DOC_IDS.length) {
+                    setIsLoading(false);
+                }
+            },
+            (error) => {
+                const permissionError = new FirestorePermissionError({
+                    path: docRef.path,
+                    operation: 'get',
+                });
+                errorEmitter.emit('permission-error', permissionError);
 
-        setIsLoading(false);
-    }, (error) => {
-        const permissionError = new FirestorePermissionError({
-            path: settingsCollectionRef.path,
-            operation: 'list',
-        });
-        errorEmitter.emit('permission-error', permissionError);
-
-        console.error("Failed to fetch game settings in real-time:", error);
-        setIsLoading(false); // Stop loading even if there's an error
+                console.error(`Failed to fetch '${docId}':`, error);
+                
+                loadedCount++;
+                if (loadedCount === SETTINGS_DOC_IDS.length) {
+                    setIsLoading(false);
+                }
+            }
+        );
+        unsubscribes.push(unsubscribe);
     });
 
-    return () => unsubscribe();
-  }, []);
+    return () => unsubscribes.forEach(unsub => unsub());
+  }, [handleDocUpdate]);
+
 
   const value = { settings, isLoading, setSettings };
 

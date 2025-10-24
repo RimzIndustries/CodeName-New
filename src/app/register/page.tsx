@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc, collection, getDocs, Timestamp } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { useAuth, useFirestore } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useGameSettings } from '@/context/GameSettingsContext';
@@ -30,9 +30,16 @@ export default function RegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
   const { settings: gameSettings, isLoading: isLoadingSettings } = useGameSettings();
+  const auth = useAuth();
+  const db = useFirestore();
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!auth || !db) {
+        toast({ title: "Layanan tidak tersedia", description: "Firebase belum siap. Silakan coba lagi nanti."});
+        return;
+    }
 
     if (!prideName) {
         toast({

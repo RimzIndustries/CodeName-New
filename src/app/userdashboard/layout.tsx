@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useAuth } from '@/context/AuthContext';
+import { useUser } from '@/firebase';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,7 +10,7 @@ import { Shield, Menu, Coins, Heart, MapPin, Building2, Globe, Users, Swords, Lo
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { useAuth } from '@/firebase';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +27,8 @@ export default function UserDashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, userProfile, loading } = useAuth();
+  const { user, userProfile, loading } = useUser();
+  const auth = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 

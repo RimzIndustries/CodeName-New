@@ -6,6 +6,7 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { AuthProvider } from '@/context/AuthContext';
 import { GameSettingsProvider } from '@/context/GameSettingsContext';
 import { FirebaseErrorListener } from '@/components/FirebaseErrorListener';
+import { FirebaseClientProvider } from '@/firebase/client-provider';
 
 export const metadata: Metadata = {
   title: 'Code Name',
@@ -31,13 +32,15 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <AuthProvider>
-            <GameSettingsProvider>
-              <FirebaseErrorListener />
-              {children}
-              <Toaster />
-            </GameSettingsProvider>
-          </AuthProvider>
+          <FirebaseClientProvider>
+            <AuthProvider>
+              <GameSettingsProvider>
+                <FirebaseErrorListener />
+                {children}
+                <Toaster />
+              </GameSettingsProvider>
+            </AuthProvider>
+          </FirebaseClientProvider>
         </ThemeProvider>
       </body>
     </html>

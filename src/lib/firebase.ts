@@ -1,12 +1,12 @@
 
-import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
-import { getAuth, type Auth } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
-import { getAnalytics, type Analytics } from 'firebase/analytics';
+// Import the functions you need from the SDKs you need
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getAnalytics, isSupported } from "firebase/analytics";
 
 // Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-export const firebaseConfig = {
+const firebaseConfig = {
   apiKey: "AIzaSyA71ax-mSZvZ0zsd9mNDzRV4gBfa-rYPi4",
   authDomain: "codename-new.firebaseapp.com",
   projectId: "codename-new",
@@ -16,10 +16,18 @@ export const firebaseConfig = {
   measurementId: "G-2X95Q66Z73"
 };
 
-// A more robust way to initialize Firebase, preventing re-initialization.
-const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
-const auth: Auth = getAuth(app);
-const db: Firestore = getFirestore(app);
-const analytics: Analytics | undefined = typeof window !== 'undefined' ? getAnalytics(app) : undefined;
+// Initialize Firebase
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
-export { app, auth, db, analytics };
+// Initialize Analytics only if it's supported in the browser
+if (typeof window !== 'undefined') {
+  isSupported().then(supported => {
+    if (supported) {
+      getAnalytics(app);
+    }
+  });
+}
+
+export { app, auth, db };
