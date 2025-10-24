@@ -9,7 +9,7 @@ import type { ReactNode } from 'react';
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { Crown } from 'lucide-react';
-import { type GameSettings, useGameSettings } from './GameSettingsContext';
+import { type GameSettings, useGameSettings } from '@/context/GameSettingsContext';
 
 interface BuildingCounts {
   residence: number;

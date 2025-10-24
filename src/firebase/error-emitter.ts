@@ -1,3 +1,4 @@
+
 // A simple event emitter for handling global application events.
 // This is used to decouple error reporting from error handling.
 

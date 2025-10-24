@@ -1,3 +1,4 @@
+
 // Defines custom error types for the application.
 
 export type SecurityRuleContext = {
