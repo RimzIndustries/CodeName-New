@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { ThemeProvider } from '@/components/theme-provider';
 import { AuthProvider } from '@/context/AuthContext';
 import { GameSettingsProvider } from '@/context/GameSettingsContext';
+import { FirebaseErrorListener } from '@/components/FirebaseErrorListener';
 
 export const metadata: Metadata = {
   title: 'Code Name',
@@ -32,6 +33,7 @@ export default function RootLayout({
         >
           <AuthProvider>
             <GameSettingsProvider>
+              <FirebaseErrorListener />
               {children}
               <Toaster />
             </GameSettingsProvider>

@@ -4,6 +4,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 // --- Interfaces for Game Settings ---
 
@@ -147,6 +149,12 @@ export function GameSettingsProvider({ children }: { children: ReactNode }) {
 
         setIsLoading(false);
     }, (error) => {
+        const permissionError = new FirestorePermissionError({
+            path: settingsCollectionRef.path,
+            operation: 'list',
+        });
+        errorEmitter.emit('permission-error', permissionError);
+
         console.error("Failed to fetch game settings in real-time:", error);
         setIsLoading(false); // Stop loading even if there's an error
     });
