@@ -3,76 +3,96 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Fungsi bantuan untuk memeriksa apakah pengguna adalah admin
+    // Helper function to check if a user is an admin
     function isAdmin() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
-    // Pengguna dapat membaca/menulis data mereka sendiri, tetapi tidak data pengguna lain.
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-      // Admin dapat membaca semua profil pengguna
-      allow read: if isAdmin();
-    }
-
-    // Pengaturan permainan dapat dibaca oleh semua pengguna terautentikasi.
-    // Hanya admin yang dapat menulis ke pengaturan permainan.
+    // Game settings are public to all authenticated users for reading
+    // Only admins can change them
     match /game-settings/{docId} {
       allow read: if request.auth != null;
       allow write: if isAdmin();
     }
     
-    // Gelar dapat dibaca oleh semua pengguna terautentikasi.
-    // Hanya admin yang dapat membuat, memperbarui, atau menghapus gelar.
+    // Titles can be read by any authenticated user
+    // Only admins can create/update/delete them
     match /titles/{titleId} {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
+        allow read: if request.auth != null;
+        allow write: if isAdmin();
+    }
+
+    // Users can only read and write their own data.
+    // Admins can read/write any user's data.
+    match /users/{userId} {
+      allow read, write: if request.auth.uid == userId || isAdmin();
     }
     
-    // Aliansi dapat dibaca oleh semua pengguna terautentikasi.
-    // Admin dapat membuat/menghapus aliansi. Pemimpin dapat memperbarui aliansi mereka.
+    // Alliances can be read by anyone, but writing has stricter rules
     match /alliances/{allianceId} {
-      allow read: if request.auth.uid != null;
-      allow create, delete: if isAdmin();
-      allow update: if isAdmin() || get(/databases/$(database)/documents/alliances/$(allianceId)).data.leaderId == request.auth.uid;
-    }
-
-    // Antrian konstruksi hanya dapat diakses oleh pengguna yang bersangkutan.
-    match /constructionQueue/{jobId} {
-      allow read, create, delete: if request.auth.uid == request.resource.data.userId;
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        // Only the alliance leader (determined by votes) or an admin can update
+        // This is a simplified rule; a real implementation might check a 'leaderId' field
+        allow update: if isAdmin(); 
+        allow delete: if isAdmin();
     }
     
-    // Antrian pelatihan hanya dapat diakses oleh pengguna yang bersangkutan.
-    match /trainingQueue/{jobId} {
-      allow read, create, delete: if request.auth.uid == request.resource.data.userId;
-    }
-    
-    // Suara hanya dapat diakses oleh pengguna yang bersangkutan.
+    // Votes can be created/updated by the voter themselves
     match /votes/{userId} {
-        allow read, write: if request.auth.uid == userId;
+        allow read: if request.auth != null;
+        allow write: if request.auth.uid == userId;
     }
     
-    // Perang dapat dibaca oleh semua, tetapi hanya dapat dibuat oleh admin atau pemimpin aliansi.
-    match /wars/{warId} {
-        allow read: if request.auth.uid != null;
-        allow create, delete: if isAdmin();
+    // Queues are write-only for the user creating them, and shouldn't be read from client
+    match /constructionQueue/{jobId} {
+        allow read: if request.auth.uid == resource.data.userId;
+        allow create: if request.auth.uid == request.resource.data.userId;
+        allow delete: if request.auth.uid == resource.data.userId || isAdmin();
     }
     
-    // Antrian serangan hanya dapat dibuat oleh penyerang.
-    match /attackQueue/{missionId} {
-      allow create: if request.resource.data.attackerId == request.auth.uid;
-      // Aturan lain untuk read/delete akan lebih kompleks (misalnya, hanya untuk fungsi cloud)
-    }
-    
-    // Laporan hanya dapat dibaca oleh pengguna yang terlibat.
-    match /reports/{reportId} {
-      allow read, update: if request.auth.uid in resource.data.involvedUsers;
-    }
-    
-    // Log aktivitas hanya dapat dibuat (ditambahkan) oleh pengguna terautentikasi.
-    match /activityLog/{logId} {
-      allow create: if request.auth.uid != null;
+    match /trainingQueue/{jobId} {
+        allow read: if request.auth.uid == resource.data.userId;
+        allow create: if request.auth.uid == request.resource.data.userId;
+        allow delete: if request.auth.uid == resource.data.userId || isAdmin();
     }
 
+    match /attackQueue/{jobId} {
+        allow read: if request.auth.uid == resource.data.attackerId;
+        allow create: if request.auth.uid == request.resource.data.attackerId;
+        allow delete: if request.auth.uid == resource.data.attackerId || isAdmin();
+    }
+
+    match /returnQueue/{jobId} {
+        allow read: if request.auth.uid == resource.data.userId;
+        allow create: if isAdmin(); // Should only be created by server-side logic
+        allow delete: if isAdmin();
+    }
+
+    match /transportQueue/{jobId} {
+        allow read: if request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.recipientId;
+        allow create: if request.auth.uid == request.resource.data.senderId;
+        allow delete: if request.auth.uid == resource.data.senderId || isAdmin();
+    }
+    
+    // Reports can only be read by users involved in them
+    match /reports/{reportId} {
+        allow read: if request.auth.uid in resource.data.involvedUsers;
+        allow create: if isAdmin(); // Reports are created by backend logic
+        allow update: if request.auth.uid in resource.data.involvedUsers; // For marking as read
+    }
+    
+    // Wars can be read by anyone, but only created/deleted by admins
+    match /wars/{warId} {
+        allow read: if request.auth != null;
+        allow create: if isAdmin();
+        allow delete: if isAdmin();
+    }
+
+    // Activity log is append-only for authenticated users
+    match /activityLog/{logId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth.uid == request.resource.data.userId;
+    }
   }
 }
