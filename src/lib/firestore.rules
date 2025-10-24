@@ -1,0 +1,93 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAdmin() {
+      // Check for the admin role on the user's own document
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // --- Collection Rules ---
+
+    // USERS
+    match /users/{userId} {
+      // Anyone can read public user data (for leaderboards, etc.)
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      // A user can create their own document
+      allow create: if isOwner(userId);
+      // A user can update their own data, or an admin can update any user
+      allow update: if isOwner(userId) || isAdmin();
+      // A user can delete their own account, or an admin can delete any user
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+    
+    // ALLIANCES
+    match /alliances/{allianceId} {
+      // Any signed-in user can read alliance data
+      allow get, list: if isSignedIn();
+      // An admin can create or delete alliances
+      allow create, delete: if isAdmin();
+      // A member of the alliance can update it (client-side logic restricts to leader)
+      // Or an admin can update it
+      allow update: if (isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.allianceId == allianceId) || isAdmin();
+    }
+    
+    // TITLES
+    match /titles/{titleId} {
+      // Any signed-in user can read titles
+      allow get, list: if isSignedIn();
+      // Only admins can create, update, or delete titles
+      allow write: if isAdmin();
+    }
+    
+    // GAME SETTINGS
+    match /game-settings/{docId} {
+      // Any signed-in user can read game settings
+      allow get: if isSignedIn();
+      // Only admins can write to game settings
+      allow write: if isAdmin();
+    }
+    
+    // VOTES
+    match /votes/{userId} {
+      // Any signed-in user can list all votes. Client MUST filter by allianceId.
+      // This is a required security trade-off to allow the feature to work.
+      allow list: if isSignedIn();
+      // Any signed-in user can get a specific vote document
+      allow get: if isSignedIn();
+      // A user can write (create/update) only their own vote document.
+      allow write: if isOwner(userId) || isAdmin();
+    }
+    
+    // CONSTRUCTION QUEUE
+    match /constructionQueue/{jobId} {
+      // Any signed-in user can read queue data. Client MUST filter by userId.
+      allow get, list: if isSignedIn();
+      // A user can create a job for themselves.
+      allow create: if request.resource.data.userId == request.auth.uid || isAdmin();
+      // A user can delete their own job (needed for the client-side processing)
+      allow delete: if resource.data.userId == request.auth.uid || isAdmin();
+    }
+    
+    // TRAINING QUEUE
+    match /trainingQueue/{jobId} {
+      // Any signed-in user can read queue data. Client MUST filter by userId.
+      allow get, list: if isSignedIn();
+      // A user can create a job for themselves.
+      allow create: if request.resource.data.userId == request.auth.uid || isAdmin();
+      // A user can delete their own job (needed for the client-side processing)
+      allow delete: if resource.data.userId == request.auth.uid || isAdmin();
+    }
+  }
+}
