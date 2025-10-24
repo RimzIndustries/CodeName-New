@@ -1,0 +1,99 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+  
+    // --- Helper Functions ---
+    function isAuth() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuth() && request.auth.token.admin == true;
+    }
+
+    function isOwner(userId) {
+      return isAuth() && request.auth.uid == userId;
+    }
+
+    // --- Global Data Collections ---
+
+    // Game settings can be read by any authenticated user, but only written by admins.
+    match /game-settings/{docId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+    
+    // Titles can be read by any authenticated user, but only written by admins.
+    match /titles/{titleId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+    
+    // Alliances can be read by any authenticated user, but only written by admins (for creation/deletion).
+    // Member-based updates might need more granular rules if leaders can edit.
+    match /alliances/{allianceId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // --- User Data ---
+    
+    // Users can read other user profiles (for rankings, etc.) but can only write to their own.
+    match /users/{userId} {
+      allow read: if isAuth();
+      allow update: if isOwner(userId);
+      allow create: if isAuth(); // New users can create their own profile.
+      allow delete: if isAdmin() || isOwner(userId);
+    }
+    
+    // --- Dynamic/Transactional Collections ---
+
+    // Any authenticated user can create an activity log entry (e.g., for their own actions).
+    // Reading logs should probably be restricted.
+    match /activityLog/{logId} {
+        allow read: if false; // Or restricted to admins/specific users
+        allow create: if isAuth();
+    }
+    
+    // Users can only create votes for themselves. Reading votes might be open to alliance members.
+    match /votes/{userId} {
+        allow read, write: if isOwner(userId);
+    }
+    
+    // Users can only access reports where they are involved.
+    match /reports/{reportId} {
+        allow read, write, delete: if isAuth() && resource.data.involvedUsers.hasAny([request.auth.uid]);
+        allow create: if isAuth();
+    }
+    
+    // Queues: Users can only create/manage their own queue items.
+    match /constructionQueue/{jobId} {
+      allow read, write, delete: if isAuth() && resource.data.userId == request.auth.uid;
+      allow create: if isAuth();
+    }
+    match /trainingQueue/{jobId} {
+      allow read, write, delete: if isAuth() && resource.data.userId == request.auth.uid;
+      allow create: if isAuth();
+    }
+    match /attackQueue/{jobId} {
+      allow read, write, delete: if isAuth() && resource.data.attackerId == request.auth.uid;
+      allow create: if isAuth();
+    }
+    match /returnQueue/{jobId} {
+      allow read, write, delete: if isAuth() && resource.data.userId == request.auth.uid;
+      allow create: if isAuth();
+    }
+    match /transportQueue/{jobId} {
+      allow read, write, delete: if isAuth() && (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid);
+      allow create: if isAuth();
+    }
+    
+    // Wars can be read by anyone authenticated, but only created/deleted by admins.
+    match /wars/{warId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+  }
+}
