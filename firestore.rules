@@ -1,22 +1,24 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Pengguna dapat membaca/menulis dokumen mereka sendiri
+    // Pengguna hanya bisa membaca & menulis data mereka sendiri.
     match /users/{userId} {
-      allow read, update, write: if request.auth != null && request.auth.uid == userId;
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Izinkan semua pengguna yang terautentikasi untuk membaca pengaturan permainan
+    // Semua pengguna yang terautentikasi bisa membaca pengaturan permainan.
     match /game-settings/{document=**} {
-      allow read: if request.auth != null;
+      allow get, list: if request.auth != null;
     }
-
-    // Koleksi lain (seperti judul, aliansi, dll.) dapat dibaca oleh semua pengguna yang terautentikasi
+    
+    // Koleksi lain (seperti judul, aliansi, antrian) dapat dibaca oleh semua pengguna terautentikasi
+    // tetapi hanya bisa ditulis/dihapus oleh admin (aturan akan disempurnakan nanti jika diperlukan).
     match /{collection}/{docId} {
-        allow read: if request.auth != null;
-        // Aturan tulis yang lebih spesifik mungkin diperlukan di sini di masa mendatang
+       allow read: if request.auth != null;
+       // Aturan tulis/hapus yang lebih ketat bisa ditambahkan di sini.
+       // Untuk saat ini, kita fokus pada perbaikan masalah baca.
     }
   }
 }
