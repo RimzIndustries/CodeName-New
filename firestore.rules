@@ -1,82 +1,100 @@
-
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-  
-    // Helper function to check if user is an admin
-    function isAdmin() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // game-settings: Everyone can read, only admin can write.
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    //----------------------------------------------------------------------
+    //  Public Game Data
+    //  Collections that all signed-in users need to be able to read
+    //  but only admins can write.
+    //----------------------------------------------------------------------
     match /game-settings/{docId} {
-      allow read: if request.auth != null;
+      allow read: if isSignedIn();
       allow write: if isAdmin();
     }
     
-    // users: Users can read/write their own data. Admin can read/write anyone's data.
-    match /users/{userId} {
-      allow read, write: if request.auth.uid == userId || isAdmin();
+    match /titles/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
     
-    // titles: Everyone can read, only admin can write.
-    match /titles/{titleId} {
-        allow read: if request.auth != null;
+    match /alliances/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    //----------------------------------------------------------------------
+    //  User Data
+    //  Users can read all profiles (for rankings, etc.) but can only
+    //  write to their own document. Admins have full write access.
+    //----------------------------------------------------------------------
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+    
+    //----------------------------------------------------------------------
+    //  Game Mechanics Collections
+    //  These have more specific rules.
+    //----------------------------------------------------------------------
+
+    // Votes: Any signed-in user can cast/update their own vote.
+    match /votes/{userId} {
+       allow read, write: if isOwner(userId);
+    }
+    
+    // Reports: Users can only access reports where their UID is involved.
+    match /reports/{reportId} {
+        allow read, write: if isSignedIn() && request.auth.uid in resource.data.involvedUsers;
+    }
+    
+    // Wars: Only admins can create or end wars. Everyone can read.
+    match /wars/{warId} {
+        allow read: if isSignedIn();
         allow write: if isAdmin();
     }
     
-    // alliances: Everyone can read. Only leaders/admins can write (simplified for now).
-    match /alliances/{allianceId} {
-        allow read: if request.auth != null;
-        allow write: if isAdmin(); // Simplified: allowing only admin to edit for now.
-    }
-    
-    // reports, activityLog: Users can only access their own.
-    match /reports/{reportId} {
-        allow read, write: if request.auth.uid in resource.data.involvedUsers;
-    }
-    
+    // Activity Log: Users can only create new log entries. No reads or updates.
     match /activityLog/{logId} {
-        allow read: if request.auth != null;
-        allow create: if request.auth.uid == request.resource.data.userId;
-    }
-    
-    // votes: Authenticated users can create/update their own vote.
-    match /votes/{userId} {
-        allow read, write: if request.auth.uid == userId;
+        allow read, update, delete: if false;
+        allow create: if isSignedIn();
     }
 
-    // Queues (construction, training, attack, transport, return): users can manage their own queue items.
+    //----------------------------------------------------------------------
+    //  Queue Collections
+    //  Users can only create and read their own queue items.
+    //----------------------------------------------------------------------
     match /constructionQueue/{jobId} {
-        allow read, create: if request.auth.uid == request.resource.data.userId;
-        allow delete: if request.auth.uid == resource.data.userId || isAdmin();
+        allow read, write: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
     
     match /trainingQueue/{jobId} {
-        allow read, create: if request.auth.uid == request.resource.data.userId;
-        allow delete: if request.auth.uid == resource.data.userId || isAdmin();
+        allow read, write: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    match /attackQueue/{jobId} {
+        allow read, write: if isSignedIn() && request.resource.data.attackerId == request.auth.uid;
     }
     
-    match /attackQueue/{jobId} {
-        allow read, create: if request.auth.uid == request.resource.data.attackerId;
-        allow delete: if request.auth.uid == resource.data.attackerId || isAdmin();
+    match /returnQueue/{jobId} {
+        allow read, write: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
     
     match /transportQueue/{jobId} {
-        allow read, create: if request.auth.uid == request.resource.data.senderId;
-        allow delete: if request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.recipientId || isAdmin();
-    }
-
-    match /returnQueue/{jobId} {
-        allow read, create: if request.resource.data.userId != null; // System created
-        allow delete: if request.auth.uid == resource.data.userId || isAdmin();
-    }
-    
-    // Wars can be read by anyone, but only created/deleted by admins for now
-    match /wars/{warId} {
-      allow read: if request.auth != null;
-      allow write, delete: if isAdmin();
+        allow read, write: if isSignedIn() && (request.resource.data.senderId == request.auth.uid || request.resource.data.recipientId == request.auth.uid);
     }
   }
 }
