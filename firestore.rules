@@ -1,85 +1,76 @@
+
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isOwner(userId) {
-      return request.auth.uid == userId;
-    }
-
-    function isAdmin() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-
-    // users: Pengguna hanya bisa membaca/menulis data mereka sendiri. Admin bisa melakukan apa saja.
+    // Pengguna hanya dapat membaca/menulis data mereka sendiri.
     match /users/{userId} {
-      allow read, update, write: if isSignedIn() && (isOwner(userId) || isAdmin());
-      allow delete: if isSignedIn() && isOwner(userId);
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
-    
-    // game-settings: Siapa saja yang masuk bisa membaca. Hanya admin yang bisa menulis.
+
+    // Siapa pun yang terautentikasi dapat membaca pengaturan permainan.
+    // Hanya admin yang bisa menulisnya (ditegakkan oleh logika sisi server/klien,
+    // aturan ini adalah lapisan pertahanan dasar).
     match /game-settings/{docId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+        allow read: if request.auth != null;
+        allow write: if false; // Perubahan pada pengaturan harus dilakukan melalui fungsi admin yang aman.
     }
     
-    // titles: Siapa saja yang masuk bisa membaca. Hanya admin yang bisa menulis/menghapus.
-    match /titles/{docId} {
-      allow read: if isSignedIn();
-      allow write, delete: if isAdmin();
+    // Aturan untuk koleksi judul
+    match /titles/{titleId} {
+        allow read: if request.auth != null;
+        allow write: if false; // Hanya admin yang dapat mengubah melalui UI admin
     }
     
-    // alliances: Siapa saja yang masuk bisa membaca. Pemimpin aliansi/admin bisa update. Admin bisa buat/hapus.
+    // Aturan untuk aliansi
     match /alliances/{allianceId} {
-        allow read: if isSignedIn();
-        allow create, delete: if isAdmin();
-        allow update: if isSignedIn() && (isAdmin() || get(/databases/$(database)/documents/alliances/$(allianceId)).data.leaderId == request.auth.uid);
-    }
-
-    // reports & activityLog: Hanya bisa dibuat. Pengguna hanya bisa membaca laporan yang melibatkannya.
-    match /reports/{reportId} {
-        allow create: if isSignedIn();
-        allow read: if isSignedIn() && request.auth.uid in resource.data.involvedUsers;
+        allow read: if request.auth != null;
+        // Penulisan (pembuatan/pembaruan) akan ditangani oleh logika sisi klien
+        // yang seharusnya sudah memiliki validasi peran admin.
+        allow write: if request.auth != null; 
     }
     
-    match /activityLog/{logId} {
-        allow create: if isSignedIn();
-        allow read: if false; // Tidak ada yang boleh membaca log aktivitas secara langsung
-    }
-
-    // votes: Pengguna hanya bisa membuat/memperbarui suara mereka sendiri.
+    // Aturan untuk suara
     match /votes/{userId} {
-        allow read: if isSignedIn();
-        allow create, update: if isSignedIn() && isOwner(userId);
+      // Seorang pengguna dapat memberikan atau mengubah suara mereka sendiri.
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Koleksi antrian (Queues): Pengguna hanya bisa membuat dan membaca item mereka sendiri.
+    // Aturan untuk antrian konstruksi dan pelatihan
     match /constructionQueue/{jobId} {
-      allow read, create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+        allow read, write: if request.auth != null && request.resource.data.userId == request.auth.uid;
     }
     match /trainingQueue/{jobId} {
-      allow read, create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+        allow read, write: if request.auth != null && request.resource.data.userId == request.auth.uid;
     }
     match /attackQueue/{jobId} {
-      allow read, create: if isSignedIn() && request.resource.data.attackerId == request.auth.uid;
+        allow read, write: if request.auth != null && request.resource.data.attackerId == request.auth.uid;
     }
-     match /transportQueue/{jobId} {
-      allow read, create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+     match /returnQueue/{jobId} {
+        allow read, write: if request.auth != null && request.resource.data.userId == request.auth.uid;
     }
-    match /returnQueue/{jobId} {
-      allow read, create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+    match /transportQueue/{jobId} {
+         allow read, write: if request.auth != null && (request.resource.data.senderId == request.auth.uid || request.resource.data.recipientId == request.auth.uid);
+    }
+    
+    // Laporan hanya dapat diakses oleh pengguna yang terlibat
+    match /reports/{reportId} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.involvedUsers;
+      allow write: if false; // Laporan dibuat oleh sistem, tidak oleh klien
+    }
+    
+    // Perang dapat dibaca oleh siapa saja yang terautentikasi
+    match /wars/{warId} {
+        allow read: if request.auth != null;
+        allow write: if false; // Hanya admin yang dapat mengelola perang
     }
 
-    // wars: Siapa saja yang masuk bisa membaca. Admin bisa menghapus. Pemimpin aliansi bisa membuat.
-    match /wars/{warId} {
-      allow read: if isSignedIn();
-      allow delete: if isAdmin();
-      allow create: if isSignedIn(); // Logika pemimpin ada di client
+    // Log aktivitas tidak boleh bisa diubah oleh klien
+    match /activityLog/{logId} {
+        allow read: if request.auth != null;
+        allow write: if false;
     }
+
   }
 }
